@@ -1,0 +1,28 @@
+[project]
+name = "font-summer-ghost"
+version = "0.1.0"
+description = "Reproducible builder for the Summer Ghost Japanese programming font"
+requires-python = ">=3.10"
+dependencies = [
+  "fonttools==4.60.2",
+  "pillow==11.3.0",
+  "uharfbuzz==0.55.0",
+]
+
+[dependency-groups]
+dev = ["mypy>=1.18,<2", "ruff>=0.12,<1"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
+
+[tool.uv]
+package = false
