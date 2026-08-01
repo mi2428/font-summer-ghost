@@ -1,319 +1,724 @@
 #!/usr/bin/env python3
-"""Render the Summer Ghost programming-font specimen."""
+"""Render the native-4K Summer Ghost type specimen."""
 
 from __future__ import annotations
 
+import json
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
+from io import BytesIO
 from pathlib import Path
+from typing import Any
 
+import build as font_build
+from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
+
+# Look-alike characters from multiple scripts are intentional in this specimen.
+# ruff: noqa: RUF001
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
+PROVENANCE = DIST / "provenance.json"
 OUTPUTS = ROOT / "specimen.png", DIST / "specimen.png"
-WIDTH, HEIGHT = 2048, 1152
 
-# Catppuccin Mocha: https://github.com/catppuccin/palette
-BASE, MANTLE, CRUST = "#1e1e2e", "#181825", "#11111b"
-SURFACE_0, SURFACE_1, OVERLAY_0 = "#313244", "#45475a", "#6c7086"
-SUBTEXT_0, TEXT = "#a6adc8", "#cdd6f4"
-BLUE, MAUVE, PEACH, GREEN = "#89b4fa", "#cba6f7", "#fab387", "#a6e3a1"
+SCALE = 2
+LOGICAL_WIDTH, LOGICAL_HEIGHT = 1920, 1080
+WIDTH, HEIGHT = LOGICAL_WIDTH * SCALE, LOGICAL_HEIGHT * SCALE
 
-DISPLAY_SIZE, QUOTE_SIZE, JP_QUOTE_SIZE = 56, 34, 30
-PANEL_TITLE_SIZE, BODY_SIZE, JP_BODY_SIZE = 18, 19, 17
-LABEL_SIZE, SMALL_SIZE, METRIC_SIZE = 12, 14, 32
+# Twelve-column editorial grid.
+MARGIN = 56
+COLUMN = 136
+GUTTER = 16
+
+# Shared layout tokens.
+PANEL_HEADER = 44
+PANEL_PAD = 20
+
+# Square-edged nocturnal palette. Syntax roles use the same accents throughout.
+CANVAS = "#0A0E15"
+PANEL = "#111722"
+INSET = "#0C111A"
+INK = "#E7ECF5"
+MUTED = "#96A0B2"
+FAINT = "#596477"
+RULE = "#2A3548"
+CYAN = "#6ED4E8"
+BLUE = "#78B4FF"
+VIOLET = "#C39AFA"
+AMBER = "#F0C86E"
+CORAL = "#F08B76"
+GREEN = "#8BD5A7"
 
 Point = tuple[int, int]
 Box = tuple[int, int, int, int]
-Segment = tuple[str, str]
+Run = tuple[str, str, str]
 
 
 @dataclass(frozen=True, slots=True)
-class Sample:
-    """One labeled row in a specimen panel."""
+class Row:
+    """One labeled character-atlas row."""
 
     label: str
-    value: str
+    sample: str
     style: str = "Regular"
-    color: str = TEXT
+    color: str = INK
 
 
-BADGES = (
-    ("UPM", "1024", BLUE),
-    ("HALF", "512", MAUVE),
-    ("FULL", "1024", PEACH),
-    ("LINE", "1.0 EM", GREEN),
-    ("GRID", "16 PX", BLUE),
-    ("PUA", "NONE", MAUVE),
+@dataclass(frozen=True, slots=True)
+class Sources:
+    """Source labels read from the generated provenance document."""
+
+    ubuntu: str
+    cyroit: str
+    biz: str
+    ibm: str
+
+
+LATIN_ROWS = (
+    Row("UPPER", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    Row("LOWER", "abcdefghijklmnopqrstuvwxyz"),
+    Row("ACCENTS I", "ÀÁÂÃÄÅ Æ Ç ÈÉÊË ÌÍÎÏ Ñ ÒÓÔÕÖ Ø Œ"),
+    Row("ACCENTS II", "àáâãäå æ ç èéêë ìíîï ñ òóôõö ø œ ß"),
+    Row("COMBINING", "à á â ã ä å  Ç  è é ê  ï  ñ  ö  ü"),
+    Row("GREEK", "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ  αβγδεζηθ λμπσφω"),
+    Row("CYRILLIC", "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩ  абвгде ёжзий я"),
+    Row("FIGURES", "0123456789  00 01 02 10 42 99  1,234.56  −273.15"),
+    Row("FRACTIONS", "¼ ½ ¾  ⅐ ⅑ ⅒ ⅓ ⅔ ⅕ ⅖ ⅗ ⅘ ⅙ ⅚ ⅛ ⅜ ⅝ ⅞"),
+    Row("PUNCTUATION", "! ? ¡ ¿ . , : ; … ‥ ' ‘ ’ \" “ ” - – — _ / \\ |"),
+    Row("FULLWIDTH", "０１２３４５６７８９  ＡＢＣＤＥ  ａｂｃｄｅ  ￥＠＃％＆＊"),
 )
-LATIN_SAMPLES = (
-    Sample("UPPER", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
-    Sample("LOWER", "abcdefghijklmnopqrstuvwxyz"),
-    Sample("ACCENTS", "ÀÁÂÃÄÅ Æ Ç ÈÉÊË Ñ Ø Œ ß àáâãäå"),
-    Sample("GREEK / CYR", "ΑΒΓΔΩ αβγδε λμπσφω  ДЖЯ дёжя"),
-    Sample("FIGURES", "0123456789  ０１２３４５６７８９"),  # noqa: RUF001
-    Sample("AMBIGUOUS", "0O○〇  1Il|  2Z  5S  8B  rn m  vv w"),  # noqa: RUF001
-    Sample("OPERATORS", "{} [] () <> /\\ :;,.  => -> == != <= >= && ||"),
+
+JAPANESE_ROWS = (
+    Row("HIRAGANA A", "あいうえお かきくけこ さしすせそ たちつてと"),
+    Row("HIRAGANA B", "なにぬねの はひふへほ まみむめも やゆよ らりるれろ わをん"),
+    Row("VOICED HIRA", "がぎぐげご ざじずぜぞ だぢづでど ばびぶべぼ ぱぴぷぺぽ ゔ"),
+    Row("SMALL HIRA", "ぁぃぅぇぉ ゃゅょ っ ゎ ゕゖ  ゐゑ"),
+    Row("KATAKANA A", "アイウエオ カキクケコ サシスセソ タチツテト"),
+    Row("KATAKANA B", "ナニヌネノ ハヒフヘホ マミムメモ ヤユヨ ラリルレロ ワヲン"),
+    Row("VOICED KATA", "ガギグゲゴ ザジズゼゾ ダヂヅデド バビブベボ パピプペポ ヴ"),
+    Row("SMALL KATA", "ァィゥェォ ャュョ ッ ヮ ヵヶ  ヰヱ"),
+    Row("HALF KANA A", "ｱｲｳｴｵ ｶｷｸｹｺ ｻｼｽｾｿ ﾀﾁﾂﾃﾄ ﾅﾆﾇﾈﾉ"),
+    Row("HALF KANA B", "ﾊﾋﾌﾍﾎ ﾏﾐﾑﾒﾓ ﾔﾕﾖ ﾗﾘﾙﾚﾛ ﾜｦﾝ ﾞﾟ"),
+    Row("COMMON KANJI", "日本語 春夏秋冬 東京 京都 開発 環境 文字 情報 時間 駅 海 光"),
+    Row("DIFFICULT", "鬱 薔薇 檸檬 躊躇 饕餮 贔屓 齷齪 魑魅魍魎"),
+    Row("CJK PUNCT", "〒 々 〆 〽 「」 『』 【】 〈〉 《》 ・ 、 。 ！？ ￥ …"),
 )
-STYLE_SAMPLES = tuple(
-    Sample(label, "function ghost夏() { return 42; }", style)
-    for label, style in (("REGULAR", "Regular"), ("BOLD", "Bold"), ("ITALIC", "Italic"), ("BOLD ITALIC", "BoldItalic"))
+
+# These sets were selected by applying the build's source-precedence rules to the
+# source cmaps. Each character in a row resolves exclusively to the named fallback.
+BIZ_ROWS = (
+    Row("IPA", "ɐ ɑ ɒ ɓ ɔ ɕ ɖ ɗ ə ɚ ɜ ɞ ɟ ɠ ɡ ɤ ɥ ɦ"),
+    Row("PUNCT", "‐ ‖ ‼ ‾ ‿ ⁂ ⁇ ⁈ ⁉ ⁑"),
+    Row("NUMERALS", "Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ ⅳ ⅴ ⅵ ⅶ ⅷ"),
 )
-JAPANESE_SAMPLES = (
-    Sample("HIRAGANA 1", "あいうえお かきくけこ さしすせそ たちつてと"),
-    Sample("HIRAGANA 2", "なにぬねの はひふへほ まみむめも やゆよ らりるれろ わをん"),
-    Sample("KATAKANA 1", "アイウエオ カキクケコ サシスセソ タチツテト"),
-    Sample("KATAKANA 2", "ナニヌネノ ハヒフヘホ マミムメモ ヤユヨ ラリルレロ ワヲン"),
-    Sample("HALF KANA", "ｱｲｳｴｵ ｶｷｸｹｺ ｻｼｽｾｿ ﾀﾁﾂﾃﾄ ﾊﾋﾌﾍﾎ ﾔﾕﾖ ﾜｦﾝﾞﾟ"),
-    Sample("KANJI", "日本語 春夏秋冬 開発環境 幽霊文字 東京大阪 京都"),
-    Sample("COMPLEX", "鬱 薔薇 檸檬 躊躇 饕餮 贔屓"),
-    Sample("VARIANTS", "邊 邉 齋 齊 髙 﨑 侮 侮"),
-    Sample("IBM FALLBACK", "㐅㐧㒈㔾㗞㘔  䄃䊓䐌䕺䖾䘐"),
-    Sample("FULL FORMS", "０１２３４５６７８９ ＡＢＣ ａｂｃ ￥＠＃％"),  # noqa: RUF001
-    Sample("CJK PUNCT", "〒々〆〇「」『』【】〈〉・、。！？￥…"),  # noqa: RUF001
+IBM_ROWS = (
+    Row("EXTENSION A", "㐅㐧㒈㔾㗞㘔㢡㢭㦤㦸"),
+    Row("SUPPLEMENTARY", "𠂊𠂰𠃵𠅘𠔿𠖱𠘑𠛬"),
+    Row("COMPATIBILITY", "契蘭寧旅漣煉連廉溺糖"),
+    Row("UNCOMMON", "丄丅丌丟丣两丵丷乁乄"),
 )
-TERMINAL = (
-    "┌──────────┬──────────┐  ┏━━━━┓  ╔════╗",
-    "│  code    │  日本語  │  ┃ UI ┃  ║ 42 ║",
-    "├──────────┼──────────┤  ┣━━━━┫  ╠════╣",
-    "└──────────┴──────────┘  ┗━━━━┛  ╚════╝",
+
+TERMINAL_ROWS = (
+    Row("ENCLOSED 01–10", "① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩"),
+    Row("ENCLOSED 11–20", "⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳"),
+    Row("GEOMETRIC I", "○ 〇 ◯ ● ◉ ◎ ◌ ◊"),
+    Row("GEOMETRIC II", "□ ■ ▢ ▪ ▫ ▱ ◇ ◆ △ ▲ ▽ ▼ ☆ ★"),
+    Row("DAILY / SIGNS", "☀ ☁ ☂ ☃ ☎ ☖ ☗ ☜ ☝ ☞ ☟ ♀ ♂ ♨ ⚠"),
+    Row("MUSIC / SUITS", "♩ ♪ ♫ ♬ ♭ ♮ ♯ ♠ ♡ ♢ ♣ ♤ ♥ ♦ ♧"),
+    Row("ARROWS I", "← ↓ ↑ → ↔ ↕ ↖ ↗ ↘ ↙"),
+    Row("ARROWS II", "⇐ ⇒ ⇔ ⇦ ⇧ ⇨ ⇩ ⇄ ⇅ ⇆ ⇋ ⇌ ⇵"),
+    Row("MATH", "± × ÷ ≠ ≈ ≤ ≥ ∞ ∑ ∏ √ ∫ ∂ ∆ ∇"),
+    Row("BLOCKS", "░ ▒ ▓ █ ▁ ▂ ▃ ▄ ▅ ▆ ▇ ▀ ▌ ▐"),
+    Row("BOX DRAWING", "┌ ─ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ ╭ ╮ ╰ ╯"),
 )
-SYMBOL_SAMPLES = (
-    Sample("BOX JOINS", "┌┬┐ ├┼┤ └┴┘  ┏┳┓ ┣╋┫ ┗┻┛"),
-    Sample("ARROW / MATH", "←↓↑→  ← ↑ → ↓ ↔  ⇐ ⇒ ⇔   ± × ÷ ≠ ≈ ≤ ≥ ∞"),  # noqa: RUF001
-    Sample("BLOCKS", "░▒▓█  ▏▎▍▌▋▊▉  ▁▂▃▄▅▆▇█"),
-    Sample("PUNCT", "() [] {} <> /\\ |  「」『』【】〈〉  $ € ¥"),
-)
+
+
+def column_x(index: int) -> int:
+    """Return the left edge of a zero-indexed grid column."""
+    return MARGIN + index * (COLUMN + GUTTER)
+
+
+def span(columns: int) -> int:
+    """Return a contiguous grid span."""
+    return columns * COLUMN + (columns - 1) * GUTTER
+
+
+class Canvas:
+    """Draw exact 2x coordinates and reject canvas or panel overflow."""
+
+    def __init__(self, image: Image.Image) -> None:
+        self.draw = ImageDraw.Draw(image)
+        self._limit: Box | None = None
+
+    @staticmethod
+    def point(point: Point) -> Point:
+        return point[0] * SCALE, point[1] * SCALE
+
+    @staticmethod
+    def box(box: Box) -> Box:
+        left, top, right, bottom = box
+        return left * SCALE, top * SCALE, right * SCALE, bottom * SCALE
+
+    @staticmethod
+    def _contains(outer: Box, inner: Sequence[float]) -> bool:
+        return outer[0] <= inner[0] and outer[1] <= inner[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
+
+    def _check(self, bounds: Sequence[float], name: str) -> None:
+        native_canvas = (0, 0, WIDTH, HEIGHT)
+        if not self._contains(native_canvas, bounds):
+            raise ValueError(f"{name} exceeds canvas: {tuple(bounds)}")
+        if self._limit is not None and not self._contains(self.box(self._limit), bounds):
+            raise ValueError(f"{name} exceeds section {self._limit}: {tuple(bounds)}")
+
+    @contextmanager
+    def within(self, box: Box) -> Iterator[None]:
+        """Apply a logical bounds assertion to enclosed draw calls."""
+        previous, self._limit = self._limit, box
+        try:
+            yield
+        finally:
+            self._limit = previous
+
+    def text(
+        self,
+        point: Point,
+        value: str,
+        *,
+        face: ImageFont.FreeTypeFont,
+        fill: str = INK,
+        anchor: str = "la",
+        name: str = "text",
+    ) -> None:
+        """Draw text after verifying its ink bounds."""
+        native_point = self.point(point)
+        bounds = self.draw.textbbox(native_point, value, font=face, anchor=anchor)
+        self._check(bounds, name)
+        self.draw.text(native_point, value, font=face, fill=fill, anchor=anchor)
+
+    def textlength(self, value: str, *, face: ImageFont.FreeTypeFont) -> float:
+        """Measure text in logical pixels."""
+        return self.draw.textlength(value, font=face) / SCALE
+
+    def rectangle(
+        self,
+        box: Box,
+        *,
+        fill: str | None = None,
+        outline: str | None = None,
+        width: int = 1,
+    ) -> None:
+        """Draw a square-cornered rectangle."""
+        native = self.box(box)
+        self._check(native, "rectangle")
+        self.draw.rectangle(native, fill=fill, outline=outline, width=width * SCALE)
+
+    def line(self, box: Box, *, fill: str = RULE, width: int = 1) -> None:
+        """Draw a logical line."""
+        native = self.box(box)
+        self._check(native, "line")
+        self.draw.line(native, fill=fill, width=width * SCALE)
 
 
 @cache
-def _font(style: str = "Regular", size: int = BODY_SIZE) -> ImageFont.FreeTypeFont:
-    """Load and cache one generated face at a specific size."""
+def font_data(style: str) -> bytes:
+    """Snapshot a generated face to avoid concurrent dist replacement."""
     path = DIST / f"SummerGhost-{style}.ttf"
     if not path.is_file():
         raise SystemExit(f"{path} not found; run make build first")
-    return ImageFont.truetype(path, size=size)
+    return path.read_bytes()
 
 
-def _panel(draw: ImageDraw.ImageDraw, box: Box, title: str, accent: str) -> None:
-    """Draw a labeled panel on the plain specimen field."""
-    draw.rounded_rectangle(box, radius=14, fill=MANTLE, outline=SURFACE_1, width=2)
-    x, y, _, _ = box
-    draw.rectangle((x, y, x + 8, y + 40), fill=accent)
-    draw.text((x + 28, y + 26), title, font=_font("Bold", PANEL_TITLE_SIZE), fill=accent, anchor="lm")
+@cache
+def font(style: str = "Regular", size: int = 16) -> ImageFont.FreeTypeFont:
+    """Load one face at a logical size."""
+    return ImageFont.truetype(BytesIO(font_data(style)), size=size * SCALE)
 
 
-def _badge(draw: ImageDraw.ImageDraw, xy: Point, label: str, value: str, color: str) -> None:
-    """Draw a compact metric badge."""
-    x, y = xy
-    draw.rounded_rectangle((x, y, x + 216, y + 40), radius=10, fill=CRUST, outline=SURFACE_0, width=2)
-    draw.text((x + 12, y + 20), label, font=_font("Bold", 13), fill=SUBTEXT_0, anchor="lm")
-    draw.text((x + 202, y + 20), value, font=_font("Bold", 15), fill=color, anchor="rm")
+def _asset_name(document: dict[str, Any], prefix: str) -> str:
+    """Return one provenance asset name by stable prefix."""
+    matches = [asset["name"] for asset in document["assets"] if asset["name"].startswith(prefix)]
+    if len(matches) != 1:
+        raise ValueError(f"expected one provenance asset for {prefix!r}, found {matches}")
+    return str(matches[0])
 
 
-def _samples(
-    draw: ImageDraw.ImageDraw,
-    xy: Point,
-    rows: Sequence[Sample],
+def read_sources() -> Sources:
+    """Derive visible source labels and verify provenance origin anchors."""
+    document: dict[str, Any] = json.loads(PROVENANCE.read_text(encoding="utf-8"))
+    style = document["styles"][0]
+    scales = style["scales"]
+    origins = style["sample_origins"]
+    expected = {"U+0041": "ubuntu", "U+3042": "cyroit", "U+FF11": "biz", "U+3405": "ibm"}
+    if any(origins.get(codepoint) != source for codepoint, source in expected.items()):
+        raise ValueError(f"provenance anchors changed: {origins}")
+    ubuntu_asset = _asset_name(document, "ubuntu-font-family-")
+    cyroit_asset = _asset_name(document, "Cyroit-Regular")
+    biz_asset = _asset_name(document, "BIZUDGothic-")
+    ibm_asset = _asset_name(document, "IBMPlexSansJP-Regular")
+    return Sources(
+        ubuntu=f"{ubuntu_asset.removesuffix('.zip').upper()} / ASCII SOURCE",
+        cyroit=f"{cyroit_asset.removesuffix('.nopatch.ttf').upper()} / SCALE {scales['cyroit']:.2f}",
+        biz=f"{biz_asset.removesuffix('.zip').upper()} / SCALE {scales['biz']:.2f}",
+        ibm=(
+            f"{ibm_asset.removesuffix('.ttf').upper()} / {str(document['ibm_commit'])[:8]} / SCALE {scales['ibm']:.2f}"
+        ),
+    )
+
+
+def regular_source_origins() -> Mapping[int, str]:
+    """Reconstruct Regular's origin map using the build's fixed source precedence."""
+    roots = font_build.fetch_sources()
+    paths = {
+        source: roots[source] / filename
+        for source, filename in zip(font_build.SOURCE_ORDER, font_build.STYLES["Regular"], strict=True)
+    }
+    source_cmaps: dict[str, set[int]] = {}
+    for source, path in paths.items():
+        with TTFont(path, lazy=True) as source_font:
+            source_cmaps[source] = set(source_font.getBestCmap())
+
+    origins = {codepoint: "ubuntu" for codepoint in source_cmaps["ubuntu"] if not font_build.is_private_use(codepoint)}
+    for codepoint in source_cmaps["cyroit"]:
+        if (
+            codepoint not in origins
+            and not font_build.is_private_use(codepoint)
+            and font_build.is_adjusted_japanese(codepoint)
+        ):
+            origins[codepoint] = "cyroit"
+    for source in font_build.SOURCE_ORDER[2:]:
+        for codepoint in source_cmaps[source]:
+            if codepoint not in origins and not font_build.is_private_use(codepoint):
+                origins[codepoint] = source
+    return origins
+
+
+def validate_fallback_samples() -> None:
+    """Verify fallback labels against source precedence and final font coverage."""
+    origins = regular_source_origins()
+    with TTFont(BytesIO(font_data("Regular")), lazy=True) as generated:
+        cmap = generated.getBestCmap()
+    for expected_source, sample_rows in (("biz", BIZ_ROWS), ("ibm", IBM_ROWS)):
+        for row in sample_rows:
+            codepoints = [ord(character) for character in row.sample if not character.isspace()]
+            wrong_origins = [
+                f"U+{codepoint:04X}:{origins.get(codepoint, 'missing')}"
+                for codepoint in codepoints
+                if origins.get(codepoint) != expected_source
+            ]
+            if wrong_origins:
+                raise ValueError(f"{expected_source} {row.label} origin mismatch: {wrong_origins}")
+            missing = [f"U+{codepoint:04X}" for codepoint in codepoints if codepoint not in cmap]
+            if missing:
+                raise ValueError(f"{expected_source} {row.label} missing from generated font: {missing}")
+
+
+def validate_terminal_samples() -> None:
+    """Require a covered, non-repeating symbol catalog."""
+    with TTFont(BytesIO(font_data("Regular")), lazy=True) as generated:
+        cmap = generated.getBestCmap()
+    seen: dict[str, str] = {}
+    for row in TERMINAL_ROWS:
+        for character in row.sample:
+            if character.isspace():
+                continue
+            if previous := seen.get(character):
+                raise ValueError(f"terminal symbol {character!r} repeats in {previous!r} and {row.label!r}")
+            if ord(character) not in cmap:
+                raise ValueError(f"terminal symbol U+{ord(character):04X} is missing from Summer Ghost")
+            seen[character] = row.label
+
+
+def label(canvas: Canvas, point: Point, value: str, *, color: str = MUTED, size: int = 10) -> None:
+    """Draw one compact uppercase label."""
+    canvas.text(point, value, face=font("Bold", size), fill=color, anchor="ls", name=f"label {value}")
+
+
+def panel(canvas: Canvas, box: Box, index: str, title: str, accent: str, meta: str = "") -> None:
+    """Draw a square specimen panel with a shared heading baseline."""
+    left, top, right, _ = box
+    canvas.rectangle(box, fill=PANEL, outline=RULE)
+    canvas.rectangle((left, top, right, top + 4), fill=accent)
+    canvas.text((left + PANEL_PAD, top + 28), index, face=font("Bold", 10), fill=accent, anchor="lm")
+    canvas.text((left + 58, top + 28), title, face=font("Bold", 14), anchor="lm")
+    if meta:
+        canvas.text((right - PANEL_PAD, top + 28), meta, face=font("Bold", 9), fill=FAINT, anchor="rm")
+    canvas.line((left + PANEL_PAD, top + PANEL_HEADER, right - PANEL_PAD, top + PANEL_HEADER))
+
+
+def rows(
+    canvas: Canvas,
+    point: Point,
+    values: Sequence[Row],
     *,
-    step: int,
     label_width: int,
+    step: int,
     size: int,
+    label_size: int = 10,
 ) -> None:
-    """Render compact labeled specimen rows."""
-    x, y = xy
-    label_face = _font("Bold", LABEL_SIZE)
-    for index, sample in enumerate(rows):
-        baseline = y + index * step
-        draw.text((x, baseline), sample.label, font=label_face, fill=OVERLAY_0, anchor="ls")
-        draw.text(
-            (x + label_width, baseline), sample.value, font=_font(sample.style, size), fill=sample.color, anchor="ls"
+    """Draw consistently aligned atlas rows."""
+    x, y = point
+    for row_index, row in enumerate(values):
+        baseline = y + row_index * step
+        label(canvas, (x, baseline), row.label, size=label_size)
+        canvas.text(
+            (x + label_width, baseline),
+            row.sample,
+            face=font(row.style, size),
+            fill=row.color,
+            anchor="ls",
+            name=f"sample {row.label}",
         )
 
 
-def _runs(draw: ImageDraw.ImageDraw, xy: Point, face: ImageFont.FreeTypeFont, segments: Sequence[Segment]) -> None:
-    """Render syntax-colored segments on one baseline."""
-    x, y = xy
-    for value, color in segments:
-        draw.text((x, y), value, font=face, fill=color, anchor="ls")
-        x += round(draw.textlength(value, font=face))
+def runs(canvas: Canvas, point: Point, segments: Sequence[Run], *, size: int = 14) -> None:
+    """Draw one syntax-colored source line."""
+    x_value: float = point[0]
+    y = point[1]
+    for value, color, style in segments:
+        face = font(style, size)
+        canvas.text((round(x_value), y), value, face=face, fill=color, anchor="ls", name="syntax token")
+        x_value += canvas.textlength(value, face=face)
 
 
-def _metric_grid(draw: ImageDraw.ImageDraw, box: Box, step: int = 16) -> None:
-    """Draw the only grid in the specimen: one measured half-width per cell."""
-    left, top, right, bottom = box
-    draw.rectangle(box, fill=CRUST, outline=SURFACE_1, width=2)
-    for index, x in enumerate(range(left + step, right, step), start=1):
-        draw.line((x, top, x, bottom), fill=SURFACE_1 if index % 2 == 0 else SURFACE_0, width=1)
-    for y in range(top + step, bottom, step):
-        draw.line((left, y, right, y), fill=SURFACE_0, width=1)
-    for index in range(0, (right - left) // step, 4):
-        draw.text((left + index * step + 2, top + 2), f"{index:02}", font=_font(size=11), fill=OVERLAY_0)
-
-
-def _draw_header(draw: ImageDraw.ImageDraw) -> None:
-    """Draw the title and primary metrics."""
-    draw.text((48, 36), "SUMMER GHOST", font=_font("Bold", DISPLAY_SIZE), fill=TEXT)
-    draw.text(
-        (52, 112),
-        "PROGRAMMING FONT SPECIMEN  /  GHOSTTY JP COMPOSITE  /  NERD ICONS VIA FALLBACK",
-        font=_font(size=18),
-        fill=SUBTEXT_0,
-    )
-    for index, (label, value, color) in enumerate(BADGES):
-        _badge(draw, (1256 + index % 3 * 232, 40 + index // 3 * 48), label, value, color)
-
-
-def _draw_quote(draw: ImageDraw.ImageDraw) -> None:
-    """Draw the bilingual Red Queen quotation."""
-    _panel(draw, (48, 160, 2000, 384), "MIXED SCRIPT / THE RED QUEEN'S RACE", BLUE)
-    draw.text(
-        (80, 240),
-        "“Now, here, you see, it takes all the running you can do, to keep in the same place.”",
-        font=_font(size=QUOTE_SIZE),
-        fill=TEXT,
+def draw_header(canvas: Canvas, sources: Sources) -> None:
+    """Draw identity, scope, and source chain without technical metrics."""
+    canvas.text((MARGIN, 42), "SUMMER GHOST", face=font("Bold", 40), anchor="la", name="title")
+    canvas.text(
+        (MARGIN + 2, 102),
+        "COMPOSITE PROGRAMMING TYPE  /  CHARACTER ATLAS · READING · CODE · TERMINAL QA",
+        face=font("Bold", 12),
+        fill=MUTED,
         anchor="ls",
     )
-    draw.text(
-        (80, 296),
-        "「ここではだね、同じ場所にとどまるだけで、もう必死で走らなきゃいけないんだよ。」",
-        font=_font(size=JP_QUOTE_SIZE),
-        fill=TEXT,
-        anchor="ls",
-    )
-    _runs(
-        draw,
-        (80, 344),
-        _font(size=18),
-        (
-            ("while", MAUVE),
-            (" (", TEXT),
-            ("alice.position", BLUE),
-            (" ", TEXT),
-            ("===", MAUVE),
-            (" ", TEXT),
-            ("origin", BLUE),
-            (") { ", TEXT),
-            ("run", GREEN),
-            ("(", TEXT),
-            ("2", PEACH),
-            (" ", TEXT),
-            ("*", MAUVE),
-            (" ", TEXT),
-            ("speed", BLUE),
-            ("); }  ", TEXT),
-            ("// 赤の女王仮説 / Red Queen hypothesis", OVERLAY_0),
-        ),
-    )
-    draw.text(
-        (1968, 372),
-        "Lewis Carroll, Through the Looking-Glass (1871) / JP © 2000 Hiroo Yamagata, CC BY-SA 2.1 JP",
-        font=_font(size=12),
-        fill=OVERLAY_0,
+    canvas.text(
+        (LOGICAL_WIDTH - MARGIN, 62),
+        "UBUNTU MONO  →  CYROIT  →  BIZ UDGOTHIC  →  IBM PLEX SANS JP",
+        face=font("Bold", 11),
+        fill=CYAN,
         anchor="rs",
     )
+    canvas.text(
+        (LOGICAL_WIDTH - MARGIN, 94),
+        "REGULAR  /  BOLD  /  ITALIC  /  BOLD ITALIC",
+        face=font("Bold", 11),
+        fill=FAINT,
+        anchor="rs",
+    )
+    canvas.line((MARGIN, 126, LOGICAL_WIDTH - MARGIN, 126), fill=RULE, width=2)
 
 
-def _draw_latin(draw: ImageDraw.ImageDraw) -> None:
-    """Draw Latin coverage, ambiguity, and style samples."""
-    _panel(draw, (48, 400, 1008, 808), "LATIN / AMBIGUITY / STYLES", MAUVE)
-    _samples(draw, (80, 464), LATIN_SAMPLES, step=38, label_width=128, size=BODY_SIZE)
-    draw.line((80, 712, 976, 712), fill=SURFACE_0, width=2)
-    _samples(draw, (80, 728), STYLE_SAMPLES, step=24, label_width=128, size=17)
+def draw_reading(canvas: Canvas) -> None:
+    """Draw coherent long-form English and Japanese reading text."""
+    box = (column_x(0), 144, column_x(0) + span(8), 334)
+    panel(canvas, box, "01", "LONGFORM READING / ENGLISH + 日本語", CYAN)
+    with canvas.within(box):
+        split = box[0] + span(4) + GUTTER // 2
+        canvas.line((split, 204, split, 316))
+        label(canvas, (box[0] + PANEL_PAD, 211), "ENGLISH / REGULAR", color=CYAN)
+        label(canvas, (split + 20, 211), "日本語 / REGULAR", color=CYAN)
+        english = (
+            "At dusk, the platform releases the heat it kept all day.",
+            "A train crosses the river, carrying the last light to sea.",
+            "After the doors close, only a signal and pale reflection remain.",
+            "The clock continues quietly through the summer night.",
+        )
+        japanese = (
+            "夕暮れのホームが、一日じゅう抱えていた熱をゆっくり放していく。",
+            "列車は川を渡り、最後の光を海のほうへ運んでいく。",
+            "扉が閉じたあとには、信号と淡い反射だけが残る。",
+            "駅の時計は、夏の夜を正確に、静かに刻みつづける。",
+        )
+        for line_index, value in enumerate(english):
+            canvas.text(
+                (box[0] + PANEL_PAD, 238 + line_index * 25),
+                value,
+                face=font("Regular", 16),
+                anchor="ls",
+                name="English longform",
+            )
+        for line_index, value in enumerate(japanese):
+            canvas.text(
+                (split + 20, 238 + line_index * 25),
+                value,
+                face=font("Regular", 15),
+                anchor="ls",
+                name="Japanese longform",
+            )
 
 
-def _draw_japanese(draw: ImageDraw.ImageDraw) -> None:
-    """Draw Japanese coverage and width-form samples."""
-    _panel(draw, (1024, 400, 2000, 808), "JAPANESE COVERAGE / WIDTH FORMS", PEACH)
-    _samples(draw, (1056, 464), JAPANESE_SAMPLES, step=30, label_width=128, size=JP_BODY_SIZE)
+def draw_styles(canvas: Canvas) -> None:
+    """Draw all four generated styles at a shared size and baseline rhythm."""
+    box = (column_x(8), 144, column_x(8) + span(4), 334)
+    panel(canvas, box, "02", "FOUR STYLES", VIOLET, "COMPOSITE")
+    style_rows = (
+        Row("REGULAR", "platform / 夏のホーム", "Regular"),
+        Row("BOLD", "signal / 静かな気配", "Bold"),
+        Row("ITALIC", "reflection / 淡い光", "Italic"),
+        Row("BOLD ITALIC", "return / 夜の列車", "BoldItalic"),
+    )
+    with canvas.within(box):
+        rows(canvas, (box[0] + PANEL_PAD, 222), style_rows, label_width=122, step=29, size=17)
 
 
-def _draw_metrics(draw: ImageDraw.ImageDraw) -> None:
-    """Draw measured advances, baselines, and source scales."""
-    _panel(draw, (48, 824, 1008, 1096), "ADVANCE / BASELINE / SOURCE SCALE", GREEN)
-    _metric_grid(draw, (176, 872, 976, 1008))
-    metric_face = _font(size=METRIC_SIZE)
-    for baseline in (920, 960, 1000):
-        draw.line((176, baseline, 976, baseline), fill=BLUE, width=1)
-    for label, baseline in (("CELLS", 920), ("WIDTH", 960), ("MIXED", 1000)):
-        draw.text((80, baseline), label, font=_font("Bold", LABEL_SIZE), fill=OVERLAY_0, anchor="ls")
-    draw.text((176, 920), "ABCD日本12かな[]{}", font=metric_face, fill=TEXT, anchor="ls")
-    draw.text(
-        (176, 960),
-        "|12345|１２３４５|abcde|日本語|",  # noqa: RUF001
-        font=metric_face,
-        fill=PEACH,
+def draw_latin(canvas: Canvas, sources: Sources) -> None:
+    """Draw dense Latin, combining, Greek, Cyrillic, figures, and punctuation."""
+    box = (column_x(0), 350, column_x(0) + span(6), 704)
+    panel(canvas, box, "03", "LATIN + EUROPEAN COVERAGE", BLUE, "PRIMARY ASCII / COMPOSITE EXTENSIONS")
+    with canvas.within(box):
+        canvas.text((box[0] + PANEL_PAD, 416), sources.ubuntu, face=font("Bold", 9), fill=FAINT, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 444), LATIN_ROWS, label_width=116, step=24, size=15)
+
+
+def draw_japanese(canvas: Canvas, sources: Sources) -> None:
+    """Draw dense kana, half-width forms, common kanji, and difficult kanji."""
+    box = (column_x(6), 350, column_x(6) + span(6), 704)
+    panel(canvas, box, "04", "JAPANESE CORE + WIDTH FORMS", CORAL, "KANA · KANJI · PUNCTUATION")
+    with canvas.within(box):
+        canvas.text((box[0] + PANEL_PAD, 416), sources.cyroit, face=font("Bold", 9), fill=FAINT, anchor="ls")
+        rows(
+            canvas,
+            (box[0] + PANEL_PAD, 438),
+            JAPANESE_ROWS,
+            label_width=116,
+            step=20,
+            size=15,
+            label_size=9,
+        )
+
+
+def draw_fallbacks(canvas: Canvas, sources: Sources) -> None:
+    """Draw provenance-verified BIZ and IBM fallback-only specimens."""
+    box = (column_x(0), 720, column_x(0) + span(4), 1028)
+    panel(canvas, box, "05", "FALLBACK SOURCE ATLAS", GREEN, "SOURCE-SPECIFIC COVERAGE")
+    with canvas.within(box):
+        canvas.text((box[0] + PANEL_PAD, 791), sources.biz, face=font("Bold", 9), fill=GREEN, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 819), BIZ_ROWS, label_width=112, step=25, size=15, label_size=9)
+        canvas.line((box[0] + PANEL_PAD, 883, box[2] - PANEL_PAD, 883))
+        canvas.text((box[0] + PANEL_PAD, 907), sources.ibm, face=font("Bold", 9), fill=AMBER, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 935), IBM_ROWS, label_width=112, step=25, size=15, label_size=9)
+
+
+def draw_code(canvas: Canvas) -> None:
+    """Draw valid TypeScript with explicit syntax roles, containers, and braces."""
+    box = (column_x(4), 720, column_x(4) + span(5), 1028)
+    panel(canvas, box, "06", "CODE / TYPESCRIPT", BLUE, "ARRAY · MAP · CALLBACK · COMMENT")
+    code_box = (box[0] + PANEL_PAD, 780, box[2] - PANEL_PAD, 1016)
+    with canvas.within(box):
+        canvas.rectangle(code_box, fill=INSET, outline=RULE)
+        code: tuple[tuple[Run, ...], ...] = (
+            (
+                ("type", VIOLET, "Bold"),
+                (" Stop", CYAN, "Regular"),
+                (" = ", VIOLET, "Regular"),
+                ("{", AMBER, "Regular"),
+                (" name", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("string", CYAN, "Regular"),
+                (";", AMBER, "Regular"),
+                (" minutes", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("number", CYAN, "Regular"),
+                (" }", AMBER, "Regular"),
+                (";", AMBER, "Regular"),
+            ),
+            (
+                ("const", VIOLET, "Bold"),
+                (" stops", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("readonly", VIOLET, "Regular"),
+                (" Stop", CYAN, "Regular"),
+                ("[]", AMBER, "Regular"),
+                (" = ", VIOLET, "Regular"),
+                ("[", AMBER, "Regular"),
+            ),
+            (
+                ("  {", AMBER, "Regular"),
+                (" name", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ('"東京"', GREEN, "Regular"),
+                (",", AMBER, "Regular"),
+                (" minutes", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("0", CORAL, "Regular"),
+                (" },", AMBER, "Regular"),
+            ),
+            (
+                ("  {", AMBER, "Regular"),
+                (" name", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ('"海辺"', GREEN, "Regular"),
+                (",", AMBER, "Regular"),
+                (" minutes", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("42", CORAL, "Regular"),
+                (" },", AMBER, "Regular"),
+            ),
+            (
+                ("  {", AMBER, "Regular"),
+                (" name", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ('"山麓"', GREEN, "Regular"),
+                (",", AMBER, "Regular"),
+                (" minutes", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("105", CORAL, "Regular"),
+                (" },", AMBER, "Regular"),
+            ),
+            (("];", AMBER, "Regular"),),
+            (
+                ("function", VIOLET, "Bold"),
+                (" nextTrain", BLUE, "Regular"),
+                ("(", AMBER, "Regular"),
+                ("stops", BLUE, "Regular"),
+                (": ", INK, "Regular"),
+                ("readonly Stop[]", CYAN, "Regular"),
+                (")", AMBER, "Regular"),
+                (": ", INK, "Regular"),
+                ("string", CYAN, "Regular"),
+                (" {", AMBER, "Regular"),
+            ),
+            (("  // Keep only stops after the origin.", MUTED, "Italic"),),
+            (
+                ("  const", VIOLET, "Bold"),
+                (" late", BLUE, "Regular"),
+                (" = ", VIOLET, "Regular"),
+                ("stops", BLUE, "Regular"),
+                (".filter((", AMBER, "Regular"),
+                ("stop", BLUE, "Regular"),
+                (") => ", VIOLET, "Regular"),
+                ("stop", BLUE, "Regular"),
+                (".minutes ", INK, "Regular"),
+                (">", VIOLET, "Regular"),
+                (" 0", CORAL, "Regular"),
+                (");", AMBER, "Regular"),
+            ),
+            (
+                ("  const", VIOLET, "Bold"),
+                (" names", BLUE, "Regular"),
+                (" = ", VIOLET, "Regular"),
+                ("late", BLUE, "Regular"),
+                (".map((", AMBER, "Regular"),
+                ("stop", BLUE, "Regular"),
+                (") => ", VIOLET, "Regular"),
+                ("stop", BLUE, "Regular"),
+                (".name);", AMBER, "Regular"),
+            ),
+            (
+                ("  const", VIOLET, "Bold"),
+                (" eta", BLUE, "Regular"),
+                (" = ", VIOLET, "Regular"),
+                ("late", BLUE, "Regular"),
+                (".at(", AMBER, "Regular"),
+                ("0", CORAL, "Regular"),
+                (")?.", AMBER, "Regular"),
+                ("minutes", BLUE, "Regular"),
+                (" ", INK, "Regular"),
+                ("??", VIOLET, "Regular"),
+                (" -1", CORAL, "Regular"),
+                (";", AMBER, "Regular"),
+            ),
+            (
+                ("  return", VIOLET, "Bold"),
+                (" `次の列車: ", GREEN, "Regular"),
+                ("${", AMBER, "Regular"),
+                ("names", BLUE, "Regular"),
+                (".join(", AMBER, "Regular"),
+                ('" / "', GREEN, "Regular"),
+                (")}", AMBER, "Regular"),
+                (" (", GREEN, "Regular"),
+                ("${", AMBER, "Regular"),
+                ("eta", BLUE, "Regular"),
+                ("}", AMBER, "Regular"),
+                ("分)`", GREEN, "Regular"),
+                (";", AMBER, "Regular"),
+            ),
+            (("}", AMBER, "Regular"),),
+            (
+                ("console", BLUE, "Regular"),
+                (".log(", AMBER, "Regular"),
+                ("nextTrain", BLUE, "Regular"),
+                ("(", AMBER, "Regular"),
+                ("stops", BLUE, "Regular"),
+                ("));", AMBER, "Regular"),
+            ),
+        )
+        for line_index, syntax_line in enumerate(code, start=1):
+            baseline = 800 + (line_index - 1) * 16
+            canvas.text(
+                (code_box[0] + 14, baseline),
+                f"{line_index:02}",
+                face=font("Regular", 10),
+                fill=FAINT,
+                anchor="ls",
+            )
+            runs(canvas, (code_box[0] + 44, baseline), syntax_line, size=13)
+
+
+def draw_terminal(canvas: Canvas) -> None:
+    """Draw a dense, non-repeating atlas of terminal and everyday symbols."""
+    box = (column_x(9), 720, column_x(9) + span(3), 1028)
+    panel(canvas, box, "07", "TERMINAL + SYMBOLS", AMBER)
+    with canvas.within(box):
+        rows(
+            canvas,
+            (box[0] + PANEL_PAD, 790),
+            TERMINAL_ROWS,
+            label_width=112,
+            step=21,
+            size=14,
+            label_size=8,
+        )
+
+
+def draw_footer(canvas: Canvas) -> None:
+    """Draw a restrained specimen footer without canvas metrics."""
+    canvas.text(
+        (MARGIN, 1058),
+        "SUMMER GHOST  /  COMPOSITE TYPE SPECIMEN",
+        face=font("Bold", 10),
+        fill=FAINT,
         anchor="ls",
     )
-    _runs(
-        draw,
-        (176, 1000),
-        metric_face,
-        (
-            ("let", MAUVE),
-            (" ", TEXT),
-            ("夏", BLUE),
-            (" ", TEXT),
-            ("=", MAUVE),
-            (" ", TEXT),
-            ("42", PEACH),
-            (";  ", TEXT),
-            ("// 赤の女王", OVERLAY_0),
-        ),
-    )
-    _runs(
-        draw,
-        (80, 1038),
-        _font(size=SMALL_SIZE),
-        (
-            ("LATIN  ", BLUE),
-            ("Ubuntu Mono X100/Y103; box unscaled", TEXT),
-            ("     JP CORE  ", MAUVE),
-            ("Cyroit X100/Y100", TEXT),
-        ),
-    )
-    _runs(
-        draw,
-        (80, 1070),
-        _font(size=SMALL_SIZE),
-        (
-            ("JP EXT  ", PEACH),
-            ("BIZ 87 / IBM Plex JP 90", TEXT),
-            ("     GRID  ", GREEN),
-            ("16 px @ 32 px = 512 units", TEXT),
-        ),
-    )
-
-
-def _draw_terminal(draw: ImageDraw.ImageDraw) -> None:
-    """Draw connected terminal geometry and symbol coverage."""
-    _panel(draw, (1024, 824, 2000, 1096), "TERMINAL GEOMETRY / SYMBOL INVENTORY", BLUE)
-    terminal_face = _font(size=24)
-    for index, value in enumerate(TERMINAL):
-        draw.text((1056, 896 + index * 24), value, font=terminal_face, fill=GREEN, anchor="ls")
-    draw.line((1056, 984, 1968, 984), fill=SURFACE_0, width=2)
-    _samples(draw, (1056, 1012), SYMBOL_SAMPLES, step=24, label_width=120, size=17)
 
 
 def render() -> Image.Image:
-    """Build the complete 16:9 technical specimen."""
-    image = Image.new("RGB", (WIDTH, HEIGHT), BASE)
-    draw = ImageDraw.Draw(image)
-    for section in (_draw_header, _draw_quote, _draw_latin, _draw_japanese, _draw_metrics, _draw_terminal):
-        section(draw)
-    draw.text((48, 1120), "SUMMER GHOST  /  TECHNICAL SPECIMEN", font=_font("Bold", 12), fill=OVERLAY_0)
-    draw.text((2000, 1120), "16:9  /  CATPPUCCIN MOCHA", font=_font("Bold", 12), fill=OVERLAY_0, anchor="ra")
+    """Build the square-edged, high-density specimen."""
+    for style in ("Regular", "Bold", "Italic", "BoldItalic"):
+        font_data(style)
+    sources = read_sources()
+    validate_fallback_samples()
+    validate_terminal_samples()
+    image = Image.new("RGB", (WIDTH, HEIGHT), CANVAS)
+    canvas = Canvas(image)
+    draw_header(canvas, sources)
+    draw_reading(canvas)
+    draw_styles(canvas)
+    draw_latin(canvas, sources)
+    draw_japanese(canvas, sources)
+    draw_fallbacks(canvas, sources)
+    draw_code(canvas)
+    draw_terminal(canvas)
+    draw_footer(canvas)
     return image
 
 
 def main() -> None:
-    """Write byte-identical specimens to the repository root and dist/."""
+    """Atomically write byte-identical specimens to the root and dist."""
     DIST.mkdir(parents=True, exist_ok=True)
-    render().save(OUTPUTS[0], optimize=True)
-    shutil.copyfile(OUTPUTS[0], OUTPUTS[1])
+    root_temp = ROOT / ".specimen.png.tmp"
+    dist_temp = DIST / ".specimen.png.tmp"
+    try:
+        render().save(root_temp, format="PNG", optimize=True)
+        root_temp.replace(OUTPUTS[0])
+        shutil.copyfile(OUTPUTS[0], dist_temp)
+        dist_temp.replace(OUTPUTS[1])
+    finally:
+        root_temp.unlink(missing_ok=True)
+        dist_temp.unlink(missing_ok=True)
     for output in OUTPUTS:
         print(f"wrote    {output.relative_to(ROOT)}")
 
