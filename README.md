@@ -15,6 +15,14 @@ Latin and Japanese glyphs are balanced instead of being forced into the same bou
 - **Terminal symbols:** U+2460–U+2473 retain the complete IBM Plex Sans JP outlines with PlemolJP Console's familiar 67%-horizontal/90%-vertical enclosed-number proportions, recentered on the half-width cell. Basic arrows, the exact-mirror ⇐/⇒ pair, and an audited set of 24 common geometric, weather, phone, music, and temperature symbols stay inside that cell so Ghostty does not rescale them when neighboring cells change.
 - **Terminal geometry:** Cyroit box drawing is grid-fitted across U+2500–U+257F, while solid Block Elements are generated on exact half-, quarter-, and eighth-cell boundaries.
 
+> [!NOTE]
+> Ghostty 1.3.1 applies contextual fitting to symbol-like codepoints, including arrows and enclosed alphanumerics.
+> For committed text, it [selects a one- or two-cell constraint from the neighboring cells](https://github.com/ghostty-org/ghostty/blob/v1.3.1/src/renderer/cell.zig#L251-L293); IME preedit text is [rendered through a separate unconstrained path](https://github.com/ghostty-org/ghostty/blob/v1.3.1/src/renderer/generic.zig#L3319-L3326).
+> 
+> The same character can therefore change apparent size when composition is confirmed or adjacent content changes.
+> Ghostty does not currently expose a configuration option to disable this behavior.
+> Summer Ghost keeps frequent symbols inside one cell where practical and gives U+2460–U+2473 PlemolJP-style elliptical outlines that remain legible when Ghostty fits them to one cell, but a font alone cannot make the two rendering paths identical.
+
 ## Installation
 
 [uv](https://docs.astral.sh/uv/) is required. The first build downloads pinned upstream assets and verifies their SHA-256 digests.
