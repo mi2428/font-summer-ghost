@@ -18,6 +18,7 @@ DIST = ROOT / "dist"
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 EXPECTED_ORIGINS = {
     "U+0041": "ubuntu",
+    "U+2190": "cyroit",
     "U+2500": "ubuntu",
     "U+3042": "cyroit",
     "U+65E5": "cyroit",
@@ -34,6 +35,8 @@ REQUIRED = {
     0xFA11: "BIZ UDGothic compatibility ideograph",
     0x3405: "IBM Plex Sans JP fallback",
 }
+HORIZONTAL_ARROWS = (0x2190, 0x2192)
+VERTICAL_ARROWS = (0x2191, 0x2193)
 INK_HEIGHTS = {
     False: {0x0041: 0.638, 0x3042: 0.788, 0x65E5: 0.760, 0x8A9E: 0.792},
     True: {0x0041: 0.638, 0x3042: 0.796, 0x65E5: 0.771, 0x8A9E: 0.803},
@@ -116,6 +119,19 @@ def validate_font(path: Path, style: str) -> None:
         expect(_bounds(font, cmap[0x00C0])[3], 850, f"{path.name} unscaled non-ASCII accent")
         x_min, y_min, x_max, y_max = _bounds(font, cmap[0x2500])
         expect((x_max - x_min, y_max - y_min), (512, 82), f"{path.name} box drawing")
+        horizontal_heights: list[int] = []
+        for cp in HORIZONTAL_ARROWS:
+            x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
+            expect(x_max - x_min, 500, f"{path.name} U+{cp:04X} horizontal arrow ink width")
+            if x_min < 0 or x_max > 512:
+                raise AssertionError(f"{path.name} U+{cp:04X} exceeds its half-width cell: {x_min}..{x_max}")
+            horizontal_heights.append(y_max - y_min)
+        vertical_widths = [_bounds(font, cmap[cp])[2] - _bounds(font, cmap[cp])[0] for cp in VERTICAL_ARROWS]
+        if max(horizontal_heights + vertical_widths) - min(horizontal_heights + vertical_widths) > 2:
+            raise AssertionError(
+                f"{path.name} arrow cross-axis sizes differ: "
+                f"horizontal heights {horizontal_heights}, vertical widths {vertical_widths}"
+            )
         variation_tables = [table for table in font["cmap"].tables if table.format == 14]
         if not variation_tables or not variation_tables[0].uvsDict:
             raise AssertionError(f"{path.name} lacks Japanese variation sequences")
@@ -146,6 +162,7 @@ def validate_shaping(path: Path) -> None:
     for label, text, expected in (
         ("ASCII", "ABC", [512, 512, 512]),
         ("box drawing", "┌─┐", [512, 512, 512]),
+        ("compact arrows", "←↓↑→", [512, 512, 512, 512]),
     ):
         run = shape(font, text)
         expect([advance for _, advance in run], expected, f"{path.name} {label} advances")

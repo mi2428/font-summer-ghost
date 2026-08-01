@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -31,6 +32,10 @@ DOWNLOADS, SOURCES = CACHE / "downloads", CACHE / "sources"
 FAMILY, PS_FAMILY, VERSION = "Summer Ghost", "SummerGhost", "0.1.0"
 UPM, HALF_WIDTH, FULL_WIDTH = 1024, 512, 1024
 ASCENT, DESCENT, UBUNTU_VERTICAL_SCALE = 850, 174, 1.03
+HORIZONTAL_ARROW_INK_WIDTH = 500
+ARROW_HEAD_DEPTH_RATIO = 0.80
+BASIC_ARROWS = frozenset(range(0x2190, 0x2194))
+HORIZONTAL_ARROWS = {0x2190: True, 0x2192: False}
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 SOURCE_ORDER = ("ubuntu", "cyroit", "biz", "ibm")
 SOURCE_SCALES = {"cyroit": 1.0, "biz": 0.87, "ibm": 0.90}
@@ -187,9 +192,11 @@ def cell_width(codepoint: int) -> int:
 
 
 def is_adjusted_japanese(codepoint: int) -> bool:
-    """Select Cyroit's adjusted Japanese repertoire without its marker glyphs."""
+    """Select Cyroit's adjusted Japanese repertoire and terminal arrows."""
     excluded = codepoint in {0x309B, 0x309C} or 0xFF65 <= codepoint <= 0xFF9F
-    return not excluded and any(start <= codepoint <= end for start, end in JAPANESE_RANGES)
+    return codepoint in BASIC_ARROWS or (
+        not excluded and any(start <= codepoint <= end for start, end in JAPANESE_RANGES)
+    )
 
 
 def scale_ubuntu_ascii(font: TTFont) -> None:
@@ -218,22 +225,64 @@ class GlyphCopier:
         self.cmap, self.glyphs = source.getBestCmap(), source.getGlyphSet()
         self.metrics, self.source_upm = source["hmtx"].metrics, source["head"].unitsPerEm
         self.order, self.counter = target.getGlyphOrder(), 0
-        self.cache: dict[tuple[str, int], str] = {}
+        self.cache: dict[tuple[str, int, bool | None], str] = {}
 
     def copy_codepoint(self, codepoint: int) -> str:
         """Copy the glyph mapped from a Unicode codepoint."""
-        return self.copy_glyph(self.cmap[codepoint], cell_width(codepoint))
+        return self.copy_glyph(
+            self.cmap[codepoint],
+            cell_width(codepoint),
+            arrow_points_left=HORIZONTAL_ARROWS.get(codepoint),
+        )
 
-    def copy_glyph(self, source_name: str, width: int) -> str:
+    def copy_glyph(self, source_name: str, width: int, arrow_points_left: bool | None = None) -> str:
         """Copy one source glyph, centered and scaled in the requested cell."""
-        key = source_name, width
+        key = source_name, width, arrow_points_left
         if cached := self.cache.get(key):
             return cached
         factor = UPM / self.source_upm * self.scale
-        offset = 0.0 if width == 0 else (width - self.metrics[source_name][0] * factor) / 2
         recording, pen = DecomposingRecordingPen(self.glyphs), TTGlyphPen(None)
         self.glyphs[source_name].draw(recording)
-        recording.replay(TransformPen(pen, (factor, 0, 0, factor, offset, 0)))
+        if arrow_points_left is None:
+            offset = 0.0 if width == 0 else (width - self.metrics[source_name][0] * factor) / 2
+            recording.replay(TransformPen(pen, (factor, 0, 0, factor, offset, 0)))
+        else:
+            bounds_pen = BoundsPen(self.glyphs)
+            self.glyphs[source_name].draw(bounds_pen)
+            if bounds_pen.bounds is None:
+                raise ValueError(f"Cannot fit empty glyph {source_name}")
+            x_min, y_min, x_max, y_max = bounds_pen.bounds
+            natural_width = (x_max - x_min) * factor
+            head_depth = (y_max - y_min) * factor * ARROW_HEAD_DEPTH_RATIO
+            if natural_width <= HORIZONTAL_ARROW_INK_WIDTH or head_depth >= HORIZONTAL_ARROW_INK_WIDTH:
+                raise ValueError(f"Cannot shorten horizontal arrow {source_name}")
+            target_left = (width - HORIZONTAL_ARROW_INK_WIDTH) / 2
+            target_right = target_left + HORIZONTAL_ARROW_INK_WIDTH
+            shaft_factor = (HORIZONTAL_ARROW_INK_WIDTH - head_depth) / (natural_width - head_depth)
+
+            def transform_point(point: tuple[float, float]) -> tuple[float, float]:
+                x, y = point
+                distance = (x - x_min) * factor if arrow_points_left else (x_max - x) * factor
+                if distance > head_depth:
+                    distance = head_depth + (distance - head_depth) * shaft_factor
+                target_x = target_left + distance if arrow_points_left else target_right - distance
+                return target_x, y * factor
+
+            for operation, points in recording.value:
+                if operation == "moveTo":
+                    pen.moveTo(transform_point(points[0]))
+                elif operation == "lineTo":
+                    pen.lineTo(transform_point(points[0]))
+                elif operation == "curveTo":
+                    pen.curveTo(*(transform_point(point) for point in points))
+                elif operation == "qCurveTo":
+                    pen.qCurveTo(*(None if point is None else transform_point(point) for point in points))
+                elif operation == "closePath":
+                    pen.closePath()
+                elif operation == "endPath":
+                    pen.endPath()
+                else:
+                    raise ValueError(f"Unsupported arrow outline operation {operation}")
         glyph, name = pen.glyph(), f"sg.{self.prefix}.{self.counter:05d}"
         self.counter += 1
         self.target["glyf"].glyphs[name] = glyph
@@ -429,7 +478,9 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         "glyphs": glyph_count,
         "size_bytes": output.stat().st_size,
         "scales": SOURCE_SCALES,
-        "sample_origins": {f"U+{cp:04X}": origins.get(cp) for cp in (0x0041, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)},
+        "sample_origins": {
+            f"U+{cp:04X}": origins.get(cp) for cp in (0x0041, 0x2190, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
+        },
     }
     print(f"wrote    {output.name}: {len(mapping):,} codepoints, IBM fallback {counts['ibm']:,}, UVS {uvs_count:,}")
     return summary

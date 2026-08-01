@@ -83,7 +83,7 @@ TERMINAL = (
 )
 SYMBOL_SAMPLES = (
     Sample("BOX JOINS", "┌┬┐ ├┼┤ └┴┘  ┏┳┓ ┣╋┫ ┗┻┛"),
-    Sample("ARROW / MATH", "← ↑ → ↓ ↔  ⇐ ⇒ ⇔   ± × ÷ ≠ ≈ ≤ ≥ ∞"),  # noqa: RUF001
+    Sample("ARROW / MATH", "←↓↑→  ← ↑ → ↓ ↔  ⇐ ⇒ ⇔   ± × ÷ ≠ ≈ ≤ ≥ ∞"),  # noqa: RUF001
     Sample("BLOCKS", "░▒▓█  ▏▎▍▌▋▊▉  ▁▂▃▄▅▆▇█"),
     Sample("PUNCT", "() [] {} <> /\\ |  「」『』【】〈〉  $ € ¥"),
 )
