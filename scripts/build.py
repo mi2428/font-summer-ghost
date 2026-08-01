@@ -14,6 +14,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from contextlib import ExitStack, closing
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -33,11 +34,38 @@ FAMILY, PS_FAMILY, VERSION = "Summer Ghost", "SummerGhost", "0.1.0"
 UPM, HALF_WIDTH, FULL_WIDTH = 1024, 512, 1024
 ASCENT, DESCENT, UBUNTU_VERTICAL_SCALE = 850, 174, 1.03
 HORIZONTAL_ARROW_INK_WIDTH = 500
+CELL_FIT_INK_WIDTH = 500
 ARROW_HEAD_DEPTH_RATIO = 0.80
 BASIC_ARROWS = frozenset(range(0x2190, 0x2194))
 HORIZONTAL_ARROWS = {0x2190: True, 0x2192: False}
+MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
+ENCLOSED_DIGITS = range(0x2460, 0x2474)
+PLEMOL_REFERENCE_UPM = 1000
+PLEMOL_ENCLOSED_X_SCALE = 0.67
+PLEMOL_ENCLOSED_Y_SCALE = 0.90
+GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
+    {
+        0x25A0,
+        0x25A1,
+        0x25B2,
+        0x25B3,
+        0x25BC,
+        0x25BD,
+        0x25C6,
+        0x25C7,
+        0x25CB,
+        0x25CE,
+        0x25CF,
+        0x25EF,
+        0x2605,
+        0x2606,
+    }
+)
+EVERYDAY_CELL_FIT_SYMBOLS = frozenset({0x203B, 0x2103, 0x2109, 0x2600, 0x2601, 0x2602, 0x260E, 0x266A, 0x266F, 0x2713})
+CYROIT_BOX_BOUNDS = (-89, -420, 601, 1014)
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 SOURCE_ORDER = ("ubuntu", "cyroit", "biz", "ibm")
+PROVENANCE_ORIGINS = (*SOURCE_ORDER, "generated")
 SOURCE_SCALES = {"cyroit": 1.0, "biz": 0.87, "ibm": 0.90}
 SOURCE_PREFIXES = {"cyroit": "j", "biz": "b", "ibm": "i"}
 JAPANESE_RANGES = (
@@ -217,6 +245,270 @@ def scale_ubuntu_ascii(font: TTFont) -> None:
         font["hmtx"].metrics[name] = (font["hmtx"].metrics[name][0], getattr(glyph, "xMin", 0))
 
 
+def _replace_glyph(font: TTFont, name: str, glyph: Any) -> None:
+    """Replace one outline while preserving its advance width."""
+    glyph.recalcBounds(font["glyf"])
+    font["glyf"].glyphs[name] = glyph
+    font["hmtx"].metrics[name] = (font["hmtx"].metrics[name][0], getattr(glyph, "xMin", 0))
+
+
+def _replay_transformed(
+    recording: DecomposingRecordingPen,
+    pen: TTGlyphPen,
+    transform_point: Callable[[tuple[float, float]], tuple[float, float]],
+) -> None:
+    """Replay an outline through a point transform that may be nonlinear."""
+    for operation, points in recording.value:
+        if operation == "moveTo":
+            pen.moveTo(transform_point(points[0]))
+        elif operation == "lineTo":
+            pen.lineTo(transform_point(points[0]))
+        elif operation == "curveTo":
+            pen.curveTo(*(transform_point(point) for point in points))
+        elif operation == "qCurveTo":
+            pen.qCurveTo(*(None if point is None else transform_point(point) for point in points))
+        elif operation == "closePath":
+            pen.closePath()
+        elif operation == "endPath":
+            pen.endPath()
+        else:
+            raise ValueError(f"Unsupported outline operation {operation}")
+
+
+def _shorten_left_arrow_point(
+    point: tuple[float, float],
+    *,
+    x_min: float,
+    head_depth: float,
+    shaft_factor: float,
+    target_left: float,
+) -> tuple[float, float]:
+    """Shorten a left-facing arrow shaft while preserving its head."""
+    x, y = point
+    distance = x - x_min
+    if distance > head_depth:
+        distance = head_depth + (distance - head_depth) * shaft_factor
+    return target_left + distance, y
+
+
+def _mirror_transformed_point(
+    point: tuple[float, float],
+    *,
+    transform_point: Callable[[tuple[float, float]], tuple[float, float]],
+) -> tuple[float, float]:
+    """Mirror a transformed point around the half-width cell center."""
+    x, y = transform_point(point)
+    return HALF_WIDTH - x, y
+
+
+def _set_mapped_glyph(
+    font: TTFont,
+    cmap: MutableMapping[int, str],
+    codepoint: int,
+    glyph: Any,
+    prefix: str,
+) -> bool:
+    """Replace or add one half-width mapped glyph; return whether it was added."""
+    if glyph_name := cmap.get(codepoint):
+        _replace_glyph(font, glyph_name, glyph)
+        return False
+
+    glyph_name = f"sg.{prefix}.{codepoint:04X}"
+    if glyph_name in font["glyf"].glyphs:
+        raise ValueError(f"Duplicate generated glyph name {glyph_name}")
+    glyph.recalcBounds(font["glyf"])
+    font["glyf"].glyphs[glyph_name] = glyph
+    order = font.getGlyphOrder()
+    order.append(glyph_name)
+    font.setGlyphOrder(order)
+    font["hmtx"].metrics[glyph_name] = (HALF_WIDTH, getattr(glyph, "xMin", 0))
+    cmap[codepoint] = glyph_name
+    return True
+
+
+def replace_box_drawing(
+    font: TTFont,
+    source: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+) -> None:
+    """Map Cyroit's complete box-drawing grid exactly onto terminal cells."""
+    source_cmap, glyph_set = source.getBestCmap(), source.getGlyphSet()
+    source_x_min, source_y_min, source_x_max, source_y_max = CYROIT_BOX_BOUNDS
+    scale_x = HALF_WIDTH / (source_x_max - source_x_min)
+    scale_y = (ASCENT + DESCENT) / (source_y_max - source_y_min)
+    transform = (
+        scale_x,
+        0,
+        0,
+        scale_y,
+        -source_x_min * scale_x,
+        -DESCENT - source_y_min * scale_y,
+    )
+    for codepoint in range(0x2500, 0x2580):
+        recording, pen = DecomposingRecordingPen(glyph_set), TTGlyphPen(None)
+        glyph_set[source_cmap[codepoint]].draw(recording)
+        recording.replay(TransformPen(pen, transform))
+        _set_mapped_glyph(font, cmap, codepoint, pen.glyph(), "box")
+        origins[codepoint] = "cyroit"
+
+
+def _rectangles_glyph(rectangles: Iterable[tuple[int, int, int, int]]) -> Any:
+    """Build a TrueType glyph from exact, non-overlapping rectangles."""
+    pen = TTGlyphPen(None)
+    for x_min, y_min, x_max, y_max in rectangles:
+        pen.moveTo((x_min, y_min))
+        pen.lineTo((x_max, y_min))
+        pen.lineTo((x_max, y_max))
+        pen.lineTo((x_min, y_max))
+        pen.closePath()
+    return pen.glyph()
+
+
+def _fit_enclosed_digits(font: TTFont, enclosed_source: TTFont, cmap: Mapping[int, str]) -> None:
+    """Apply PlemolJP Console's enclosed-number proportions at Summer Ghost's UPM."""
+    source_cmap, source_glyphs = enclosed_source.getBestCmap(), enclosed_source.getGlyphSet()
+    upm_scale = UPM / PLEMOL_REFERENCE_UPM
+    x_scale = PLEMOL_ENCLOSED_X_SCALE * upm_scale
+    y_scale = PLEMOL_ENCLOSED_Y_SCALE * upm_scale
+    for codepoint in ENCLOSED_DIGITS:
+        glyph_name = cmap[codepoint]
+        if font["hmtx"].metrics[glyph_name][0] != HALF_WIDTH:
+            raise ValueError(f"U+{codepoint:04X} must have a half-width advance")
+        source_name = source_cmap[codepoint]
+        bounds_pen = BoundsPen(source_glyphs)
+        source_glyphs[source_name].draw(bounds_pen)
+        if bounds_pen.bounds is None:
+            raise ValueError(f"Cannot fit empty IBM U+{codepoint:04X} outline")
+        x_min, _, x_max, _ = bounds_pen.bounds
+        x_offset = HALF_WIDTH / 2 - (x_min + x_max) * x_scale / 2
+        recording, pen = DecomposingRecordingPen(source_glyphs), TTGlyphPen(None)
+        source_glyphs[source_name].draw(recording)
+        recording.replay(TransformPen(pen, (x_scale, 0, 0, y_scale, x_offset, 0)))
+        _replace_glyph(font, glyph_name, pen.glyph())
+
+
+def _normalize_mirrored_horizontal_arrows(font: TTFont, cmap: Mapping[int, str]) -> None:
+    """Shorten each left arrow's shaft and derive an exact right-facing mirror."""
+    glyph_set = font.getGlyphSet()
+    for left_codepoint, right_codepoint in MIRRORED_HORIZONTAL_ARROW_PAIRS:
+        source_name = cmap[left_codepoint]
+        bounds_pen = BoundsPen(glyph_set)
+        glyph_set[source_name].draw(bounds_pen)
+        if bounds_pen.bounds is None:
+            raise ValueError(f"Cannot normalize empty U+{left_codepoint:04X} arrow")
+        x_min, y_min, x_max, y_max = bounds_pen.bounds
+        natural_width = x_max - x_min
+        head_depth = (y_max - y_min) * ARROW_HEAD_DEPTH_RATIO
+        if natural_width <= HORIZONTAL_ARROW_INK_WIDTH or head_depth >= HORIZONTAL_ARROW_INK_WIDTH:
+            raise ValueError(f"Cannot shorten U+{left_codepoint:04X} horizontal arrow")
+        target_left = (HALF_WIDTH - HORIZONTAL_ARROW_INK_WIDTH) / 2
+        shaft_factor = (HORIZONTAL_ARROW_INK_WIDTH - head_depth) / (natural_width - head_depth)
+
+        fit_left = partial(
+            _shorten_left_arrow_point,
+            x_min=x_min,
+            head_depth=head_depth,
+            shaft_factor=shaft_factor,
+            target_left=target_left,
+        )
+        fit_right = partial(_mirror_transformed_point, transform_point=fit_left)
+
+        recording = DecomposingRecordingPen(glyph_set)
+        glyph_set[source_name].draw(recording)
+        left_pen, right_pen = TTGlyphPen(None), TTGlyphPen(None)
+        _replay_transformed(recording, left_pen, fit_left)
+        _replay_transformed(recording, right_pen, fit_right)
+        _replace_glyph(font, cmap[left_codepoint], left_pen.glyph())
+        _replace_glyph(font, cmap[right_codepoint], right_pen.glyph())
+
+
+def _fit_proportional_cell_symbols(font: TTFont, cmap: Mapping[int, str], codepoints: frozenset[int]) -> None:
+    """Fit one audited symbol class to 500-unit ink width without changing its aspect ratio."""
+    glyph_set, fitted = font.getGlyphSet(), set()
+    for codepoint in sorted(codepoints):
+        glyph_name = cmap[codepoint]
+        if glyph_name in fitted:
+            continue
+        if font["hmtx"].metrics[glyph_name][0] != HALF_WIDTH:
+            raise ValueError(f"U+{codepoint:04X} must have a half-width advance")
+        bounds_pen = BoundsPen(glyph_set)
+        glyph_set[glyph_name].draw(bounds_pen)
+        if bounds_pen.bounds is None:
+            raise ValueError(f"Cannot fit empty U+{codepoint:04X} outline")
+        x_min, y_min, x_max, y_max = bounds_pen.bounds
+        width, height = x_max - x_min, y_max - y_min
+        if width <= 0 or height <= 0:
+            raise ValueError(f"Cannot fit degenerate U+{codepoint:04X} outline")
+        scale = CELL_FIT_INK_WIDTH / width
+        x_offset = HALF_WIDTH / 2 - (x_min + x_max) * scale / 2
+        y_offset = (y_min + y_max) * (1 - scale) / 2
+        recording, pen = DecomposingRecordingPen(glyph_set), TTGlyphPen(None)
+        glyph_set[glyph_name].draw(recording)
+        recording.replay(TransformPen(pen, (scale, 0, 0, scale, x_offset, y_offset)))
+        _replace_glyph(font, glyph_name, pen.glyph())
+        fitted.add(glyph_name)
+
+
+def _set_block_glyph(
+    font: TTFont,
+    cmap: MutableMapping[int, str],
+    codepoint: int,
+    rectangles: Iterable[tuple[int, int, int, int]],
+) -> bool:
+    """Replace or add one exact solid block glyph; return whether it was added."""
+    return _set_mapped_glyph(font, cmap, codepoint, _rectangles_glyph(rectangles), "block")
+
+
+def _normalize_block_elements(
+    font: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+) -> None:
+    """Generate the complete solid Block Elements set on the terminal cell grid."""
+    bottom, middle, top = -DESCENT, (ASCENT - DESCENT) // 2, ASCENT
+    left, center, right = 0, HALF_WIDTH // 2, HALF_WIDTH
+    lower_blocks = {cp: ((left, bottom, right, bottom + 128 * (cp - 0x2580)),) for cp in range(0x2581, 0x2589)}
+    left_blocks = {cp: ((left, bottom, 64 * (0x2590 - cp), top),) for cp in range(0x2589, 0x2590)}
+    block_rectangles = {
+        0x2580: ((left, middle, right, top),),
+        **lower_blocks,
+        **left_blocks,
+        0x2590: ((center, bottom, right, top),),
+        0x2594: ((left, top - 128, right, top),),
+        0x2595: ((right - 64, bottom, right, top),),
+        0x2596: ((left, bottom, center, middle),),
+        0x2597: ((center, bottom, right, middle),),
+        0x2598: ((left, middle, center, top),),
+        0x2599: ((left, bottom, center, top), (center, bottom, right, middle)),
+        0x259A: ((left, middle, center, top), (center, bottom, right, middle)),
+        0x259B: ((left, bottom, center, top), (center, middle, right, top)),
+        0x259C: ((left, middle, right, top), (center, bottom, right, middle)),
+        0x259D: ((center, middle, right, top),),
+        0x259E: ((left, bottom, center, middle), (center, middle, right, top)),
+        0x259F: ((left, bottom, right, middle), (center, middle, right, top)),
+    }
+    for codepoint, rectangles in block_rectangles.items():
+        _set_block_glyph(font, cmap, codepoint, rectangles)
+        origins[codepoint] = "generated"
+
+
+def normalize_terminal_glyphs(
+    font: TTFont,
+    enclosed_source: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+) -> None:
+    """Stabilize audited symbols and exact terminal block graphics."""
+    _normalize_mirrored_horizontal_arrows(font, cmap)
+    _fit_enclosed_digits(font, enclosed_source, cmap)
+    for codepoint in ENCLOSED_DIGITS:
+        origins[codepoint] = "ibm"
+    _fit_proportional_cell_symbols(font, cmap, GEOMETRIC_CELL_FIT_SYMBOLS)
+    _fit_proportional_cell_symbols(font, cmap, EVERYDAY_CELL_FIT_SYMBOLS)
+    _normalize_block_elements(font, cmap, origins)
+
+
 class GlyphCopier:
     """Copy decomposed outlines into a target font at a fixed cell width."""
 
@@ -268,21 +560,7 @@ class GlyphCopier:
                 target_x = target_left + distance if arrow_points_left else target_right - distance
                 return target_x, y * factor
 
-            for operation, points in recording.value:
-                if operation == "moveTo":
-                    pen.moveTo(transform_point(points[0]))
-                elif operation == "lineTo":
-                    pen.lineTo(transform_point(points[0]))
-                elif operation == "curveTo":
-                    pen.curveTo(*(transform_point(point) for point in points))
-                elif operation == "qCurveTo":
-                    pen.qCurveTo(*(None if point is None else transform_point(point) for point in points))
-                elif operation == "closePath":
-                    pen.closePath()
-                elif operation == "endPath":
-                    pen.endPath()
-                else:
-                    raise ValueError(f"Unsupported arrow outline operation {operation}")
+            _replay_transformed(recording, pen, transform_point)
         glyph, name = pen.glyph(), f"sg.{self.prefix}.{self.counter:05d}"
         self.counter += 1
         self.target["glyf"].glyphs[name] = glyph
@@ -453,6 +731,8 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         uvs = remap_uvs(fonts["cyroit"], copier, origins)
         add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
         add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
+        replace_box_drawing(target, fonts["cyroit"], mapping, origins)
+        normalize_terminal_glyphs(target, fonts["ibm"], mapping, origins)
         target.setGlyphOrder(target.getGlyphOrder())
         target["maxp"].numGlyphs = len(target.getGlyphOrder())
         rebuild_cmap(target, mapping, uvs)
@@ -472,7 +752,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
     summary: dict[str, object] = {
         "style": style,
         "output": str(output.relative_to(ROOT)),
-        "codepoints": {source: counts[source] for source in SOURCE_ORDER},
+        "codepoints": {origin: counts[origin] for origin in PROVENANCE_ORIGINS},
         "total_codepoints": len(mapping),
         "uvs_mappings_from_cyroit": uvs_count,
         "glyphs": glyph_count,
