@@ -12,7 +12,8 @@ Latin and Japanese glyphs are balanced instead of being forced into the same bou
 - **Grid:** UPM 1024 with 512-unit half-width and 1024-unit full-width cells.
 - **Optical scale:** Ubuntu Mono ASCII is 103% vertically and 100% horizontally; adjusted Cyroit Japanese remains at 100%; direct BIZ UDGothic and IBM Plex Sans JP fallbacks are scaled to 87% and 90%, respectively.
 - **Line metrics:** Ascent 850, descent 174, and line gap 0 produce an exact 1-em line height while keeping Latin, kana, and kanji visually aligned.
-- **Terminal geometry:** Ubuntu Mono box-drawing and block-element glyphs remain unscaled so terminal UI lines retain their original weight and proportions.
+- **Terminal symbols:** U+2460–U+2473 retain the complete IBM Plex Sans JP outlines with PlemolJP Console's familiar 67%-horizontal/90%-vertical enclosed-number proportions, recentered on the half-width cell. Basic arrows, the exact-mirror ⇐/⇒ pair, and an audited set of 24 common geometric, weather, phone, music, and temperature symbols stay inside that cell so Ghostty does not rescale them when neighboring cells change.
+- **Terminal geometry:** Cyroit box drawing is grid-fitted across U+2500–U+257F, while solid Block Elements are generated on exact half-, quarter-, and eighth-cell boundaries.
 
 ## Installation
 
@@ -29,21 +30,21 @@ download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd3024
 download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf
 
 === Regular ===
-wrote    SummerGhost-Regular.ttf: 16,683 codepoints, IBM fallback 3,684, UVS 9,689
+wrote    SummerGhost-Regular.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
 
 === Bold ===
-wrote    SummerGhost-Bold.ttf: 16,683 codepoints, IBM fallback 3,684, UVS 9,689
+wrote    SummerGhost-Bold.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
 
 === Italic ===
-wrote    SummerGhost-Italic.ttf: 16,683 codepoints, IBM fallback 3,684, UVS 9,689
+wrote    SummerGhost-Italic.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
 
 === BoldItalic ===
-wrote    SummerGhost-BoldItalic.ttf: 16,683 codepoints, IBM fallback 3,684, UVS 9,689
+wrote    SummerGhost-BoldItalic.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
 wrote    dist/provenance.json
-ok       SummerGhost-Regular.ttf: 16,683 codepoints, 16,781 glyphs, 6 selectors
-ok       SummerGhost-Bold.ttf: 16,683 codepoints, 16,781 glyphs, 6 selectors
-ok       SummerGhost-Italic.ttf: 16,683 codepoints, 16,786 glyphs, 6 selectors
-ok       SummerGhost-BoldItalic.ttf: 16,683 codepoints, 16,786 glyphs, 6 selectors
+ok       SummerGhost-Regular.ttf: 16,711 codepoints, 16,809 glyphs, 6 selectors
+ok       SummerGhost-Bold.ttf: 16,711 codepoints, 16,809 glyphs, 6 selectors
+ok       SummerGhost-Italic.ttf: 16,711 codepoints, 16,814 glyphs, 6 selectors
+ok       SummerGhost-BoldItalic.ttf: 16,711 codepoints, 16,814 glyphs, 6 selectors
 validated Summer Ghost Regular/Bold/Italic/BoldItalic
 Installed Summer Ghost into ~/Library/Fonts
 ```
