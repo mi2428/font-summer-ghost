@@ -5,6 +5,8 @@ A Japanese monospace font designed for Ghostty.
 - Blends [Ubuntu Mono](https://design.ubuntu.com/font) for Latin characters with Japanese glyphs based on [Circle M+](https://itouhiro.github.io/mixfont-mplus-ipa/mplus/) and [BIZ UDGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic), supplemented by [IBM Plex Sans JP](https://github.com/IBM/plex/tree/master/packages/plex-sans-jp).
 - Feels like a natural Japanese extension of the Ubuntu font family while intentionally delegating [Nerd Fonts](https://www.nerdfonts.com/) icons to Ghostty's built-in fallback, keeping character widths and box-drawing glyphs predictable.
 
+![](specimen.png)
+
 Latin and Japanese glyphs are balanced instead of being forced into the same bounding box:
 
 - **Grid:** UPM 1024 with 512-unit half-width and 1024-unit full-width cells.

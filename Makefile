@@ -35,7 +35,7 @@ validate: build ## Validate names, metrics, coverage, and shaping
 	@$(PYTHON) scripts/validate.py
 
 .PHONY: specimen
-specimen: build ## Render dist/specimen.png for visual inspection
+specimen: build ## Render the technical specimen into the root and dist/
 	@$(PYTHON) scripts/render_specimen.py
 
 .PHONY: check
