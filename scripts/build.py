@@ -84,6 +84,7 @@ JAPANESE_RANGES = (
     (0x2F800, 0x2FA1F),
     (0x30000, 0x323AF),
 )
+WHITE_PARENTHESIS_SOURCE = 0xFF5F
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,8 +308,9 @@ def _set_mapped_glyph(
     codepoint: int,
     glyph: Any,
     prefix: str,
+    width: int = HALF_WIDTH,
 ) -> bool:
-    """Replace or add one half-width mapped glyph; return whether it was added."""
+    """Replace or add one mapped glyph; return whether it was added."""
     if glyph_name := cmap.get(codepoint):
         _replace_glyph(font, glyph_name, glyph)
         return False
@@ -321,7 +323,7 @@ def _set_mapped_glyph(
     order = font.getGlyphOrder()
     order.append(glyph_name)
     font.setGlyphOrder(order)
-    font["hmtx"].metrics[glyph_name] = (HALF_WIDTH, getattr(glyph, "xMin", 0))
+    font["hmtx"].metrics[glyph_name] = (width, getattr(glyph, "xMin", 0))
     cmap[codepoint] = glyph_name
     return True
 
@@ -493,6 +495,39 @@ def _normalize_block_elements(
         origins[codepoint] = "generated"
 
 
+def _add_white_parentheses(
+    font: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+) -> None:
+    """Derive U+2985/U+2986 from full-width U+FF5F and its exact mirror.
+
+    The pinned sources do not map either white-parenthesis codepoint.  U+FF5F
+    is the closest existing Japanese full-width opening shape, so its final
+    target outline supplies the style-specific stroke.  U+2986 is generated
+    by reflecting that decomposed outline around the 1024-unit cell centre.
+    """
+    source_name = cmap.get(WHITE_PARENTHESIS_SOURCE)
+    if source_name is None:
+        raise ValueError(f"U+{WHITE_PARENTHESIS_SOURCE:04X} is required to derive white parentheses")
+    glyph_set = font.getGlyphSet()
+    recording = DecomposingRecordingPen(glyph_set)
+    glyph_set[source_name].draw(recording)
+
+    def identity(point: tuple[float, float]) -> tuple[float, float]:
+        return point
+
+    def mirror(point: tuple[float, float]) -> tuple[float, float]:
+        return FULL_WIDTH - point[0], point[1]
+
+    left_pen, right_pen = TTGlyphPen(None), TTGlyphPen(None)
+    _replay_transformed(recording, left_pen, identity)
+    _replay_transformed(recording, right_pen, mirror)
+    _set_mapped_glyph(font, cmap, 0x2985, left_pen.glyph(), "whiteparen", width=FULL_WIDTH)
+    _set_mapped_glyph(font, cmap, 0x2986, right_pen.glyph(), "whiteparen", width=FULL_WIDTH)
+    origins[0x2985] = origins[0x2986] = "generated"
+
+
 def normalize_terminal_glyphs(
     font: TTFont,
     enclosed_source: TTFont,
@@ -507,6 +542,7 @@ def normalize_terminal_glyphs(
     _fit_proportional_cell_symbols(font, cmap, GEOMETRIC_CELL_FIT_SYMBOLS)
     _fit_proportional_cell_symbols(font, cmap, EVERYDAY_CELL_FIT_SYMBOLS)
     _normalize_block_elements(font, cmap, origins)
+    _add_white_parentheses(font, cmap, origins)
 
 
 class GlyphCopier:

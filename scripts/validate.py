@@ -41,7 +41,10 @@ REQUIRED = {
     0x9AD9: "Cyroit Japanese-name kanji",
     0xFA11: "Cyroit compatibility ideograph",
     0x3405: "IBM Plex Sans JP fallback",
+    0x2985: "left white parenthesis",
+    0x2986: "right white parenthesis",
 }
+WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
 VERTICAL_ARROWS = (0x2191, 0x2193)
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
@@ -422,6 +425,25 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             x_min, _, x_max, _ = _bounds(font, cmap[cp])
             if x_min < 0 or x_max > 512:
                 raise AssertionError(f"{path.name} U+{cp:04X} shade exceeds its cell")
+        for cp in WHITE_PARENTHESIS_PAIR:
+            glyph_name = cmap[cp]
+            x_min, y_min, x_max, y_max = _bounds(font, glyph_name)
+            expect(font["hmtx"].metrics[glyph_name][0], 1024, f"{path.name} U+{cp:04X} white parenthesis advance")
+            if x_min < 0 or x_max > 1024 or y_min < -174 or y_max > 850:
+                raise AssertionError(
+                    f"{path.name} U+{cp:04X} white parenthesis exceeds full-width cell: "
+                    f"({x_min}, {y_min}, {x_max}, {y_max})"
+                )
+        left_name, right_name = (cmap[cp] for cp in WHITE_PARENTHESIS_PAIR)
+        left_points, left_ends, left_flags = font["glyf"][left_name].getCoordinates(font["glyf"])
+        right_points, right_ends, right_flags = font["glyf"][right_name].getCoordinates(font["glyf"])
+        expect(list(left_ends), list(right_ends), f"{path.name} white parenthesis contours")
+        expect(list(left_flags), list(right_flags), f"{path.name} white parenthesis point flags")
+        expect(
+            list(left_points),
+            [(1024 - x, y) for x, y in right_points],
+            f"{path.name} exact white parenthesis mirror",
+        )
         horizontal_heights: list[int] = []
         for cp in HORIZONTAL_ARROWS:
             x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
@@ -489,6 +511,7 @@ def validate_shaping(path: Path) -> None:
         ("box drawing", "┌─┐", [512, 512, 512]),
         ("compact arrows", "←↓↑→", [512, 512, 512, 512]),
         ("mirrored double arrows", "⇐⇒", [512, 512]),
+        ("white parentheses", "⦅⦆", [1024, 1024]),
         ("circled digits", "①②③", [512, 512, 512]),
         ("all circled digits", "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳", [512] * 20),
         ("ASCII-adjacent circled digit", "A①Z", [512, 512, 512]),
@@ -556,7 +579,7 @@ def main() -> None:
         counts = summary.get("codepoints")
         if not isinstance(counts, dict) or counts.get("ibm", 0) < 1_000:
             raise AssertionError(f"{style} has insufficient IBM fallback coverage")
-        expect(counts.get("generated"), 29, f"{style} generated Block Elements")
+        expect(counts.get("generated"), 31, f"{style} generated terminal geometry")
         expect(sum(counts.values()), summary.get("total_codepoints"), f"{style} source counts")
         expect(summary.get("size_bytes"), path.stat().st_size, f"{style} artifact size")
     expect(enclosed_bounds["Regular"], enclosed_bounds["Italic"], "regular circled-digit geometry")
