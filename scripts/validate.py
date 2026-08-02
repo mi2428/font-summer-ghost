@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import json
-import unicodedata
 from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 from typing import Any, TypeVar
 
 import uharfbuzz as hb
+import unicodedata2 as unicodedata
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
 from fontTools.ttLib import TTFont
@@ -44,7 +44,9 @@ REQUIRED = {
     0x2985: "left white parenthesis",
     0x2986: "right white parenthesis",
 }
+UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
+FULL_WIDTH_OVERRIDES = frozenset(WHITE_PARENTHESIS_PAIR)
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
 VERTICAL_ARROWS = (0x2191, 0x2193)
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
@@ -189,7 +191,17 @@ def name(font: TTFont, name_id: int) -> str:
 
 def is_private_use(codepoint: int) -> bool:
     """Return whether a codepoint belongs to a Unicode private-use area."""
-    return unicodedata.category(chr(codepoint)) == "Co"
+    return bool(unicodedata.category(chr(codepoint)) == "Co")
+
+
+def cell_width(codepoint: int) -> int:
+    """Mirror the builder's Unicode 17 grid rule and Japanese overrides."""
+    if codepoint in FULL_WIDTH_OVERRIDES:
+        return 1024
+    char = chr(codepoint)
+    if unicodedata.category(char) in {"Mn", "Me"}:
+        return 0
+    return 1024 if unicodedata.east_asian_width(char) in {"W", "F"} else 512
 
 
 def _bounds(font: TTFont, glyph_name: str) -> tuple[int, int, int, int]:
@@ -285,6 +297,24 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
         if len(cmap) < 15_000:
             raise AssertionError(f"{path.name} maps only {len(cmap)} Unicode codepoints")
 
+        for codepoint, glyph_name in cmap.items():
+            expect(
+                font["hmtx"].metrics[glyph_name][0],
+                cell_width(codepoint),
+                f"{path.name} U+{codepoint:04X} Unicode 17 advance",
+            )
+        for codepoint in UNICODE17_WIDE_CODEPOINTS:
+            expect(codepoint in cmap, True, f"{path.name} Unicode 17 wide coverage U+{codepoint:04X}")
+            expect(
+                font["hmtx"].metrics[cmap[codepoint]][0],
+                1024,
+                f"{path.name} U+{codepoint:04X} explicit Unicode 17 wide advance",
+            )
+        expect(
+            font["hmtx"].metrics[cmap[0x0311]][0],
+            0,
+            f"{path.name} U+0311 combining advance",
+        )
         extents = [_bounds(font, glyph)[1::2] for glyph in set(cmap.values())]
         min_y, max_y = min(low for low, _ in extents), max(high for _, high in extents)
         if min_y < -220 or max_y > 920:

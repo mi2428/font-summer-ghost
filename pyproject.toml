@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
   "fonttools==4.60.2",
   "pillow==11.3.0",
+  "unicodedata2==17.0.0",
   "uharfbuzz==0.55.0",
 ]
 

@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import shutil
-import unicodedata
 import urllib.request
 import zipfile
 from collections import Counter
@@ -18,6 +17,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import unicodedata2 as unicodedata
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
@@ -84,7 +84,9 @@ JAPANESE_RANGES = (
     (0x2F800, 0x2FA1F),
     (0x30000, 0x323AF),
 )
+UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_SOURCE = 0xFF5F
+FULL_WIDTH_OVERRIDES = frozenset({0x2985, 0x2986})
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,11 +211,13 @@ def fetch_sources() -> Mapping[str, Path]:
 
 def is_private_use(codepoint: int) -> bool:
     """Return whether a codepoint belongs to a Unicode private-use area."""
-    return unicodedata.category(chr(codepoint)) == "Co"
+    return bool(unicodedata.category(chr(codepoint)) == "Co")
 
 
 def cell_width(codepoint: int) -> int:
     """Map Unicode display properties to the 0/half/full-width grid."""
+    if codepoint in FULL_WIDTH_OVERRIDES:
+        return FULL_WIDTH
     char = chr(codepoint)
     if unicodedata.category(char) in {"Mn", "Me"}:
         return 0
@@ -666,6 +670,19 @@ def rebuild_cmap(font: TTFont, mapping: Mapping[int, str], uvs: UVSMap) -> None:
     font["cmap"] = cmap
 
 
+def normalize_mapped_advances(font: TTFont, mapping: Mapping[int, str]) -> None:
+    """Apply the Unicode 17.0 0/512/1024 advance rule to every mapping."""
+    expected_by_glyph: dict[str, int] = {}
+    for codepoint, glyph_name in sorted(mapping.items()):
+        expected = cell_width(codepoint)
+        previous = expected_by_glyph.setdefault(glyph_name, expected)
+        if previous != expected:
+            raise ValueError(f"Glyph {glyph_name} is shared by widths {previous} and {expected}")
+    for glyph_name, width in expected_by_glyph.items():
+        _, side_bearing = font["hmtx"].metrics[glyph_name]
+        font["hmtx"].metrics[glyph_name] = width, side_bearing
+
+
 def _bit_fields(bits: Iterable[int], count: int) -> list[int]:
     values = [0] * count
     for bit in bits:
@@ -772,6 +789,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         target.setGlyphOrder(target.getGlyphOrder())
         target["maxp"].numGlyphs = len(target.getGlyphOrder())
         rebuild_cmap(target, mapping, uvs)
+        normalize_mapped_advances(target, mapping)
         strip_hinting(target)
         set_metadata(target, style, mapping)
 
