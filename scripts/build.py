@@ -734,11 +734,42 @@ def strip_hinting(font: TTFont) -> None:
             del font[tag]
 
 
+def recompute_global_metrics(font: TTFont) -> None:
+    """Recompute final-outline bounds and all applicable TrueType maxima."""
+    glyf = font["glyf"]
+    bounds: list[tuple[int, int, int, int]] = []
+    for glyph_name in font.getGlyphOrder():
+        glyph = glyf[glyph_name]
+        glyph.recalcBounds(glyf)
+        if glyph.numberOfContours:
+            bounds.append((glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax))
+    maxp = font["maxp"]
+    maxp.recalc(font)
+    head = font["head"]
+    if bounds:
+        head.xMin = min(item[0] for item in bounds)
+        head.yMin = min(item[1] for item in bounds)
+        head.xMax = max(item[2] for item in bounds)
+        head.yMax = max(item[3] for item in bounds)
+    else:
+        head.xMin = head.yMin = head.xMax = head.yMax = 0
+    # Hint programs and their storage are removed by strip_hinting().
+    maxp.maxZones = 1
+    maxp.maxTwilightPoints = 0
+    maxp.maxStorage = 0
+    maxp.maxFunctionDefs = 0
+    maxp.maxInstructionDefs = 0
+    maxp.maxStackElements = 0
+    maxp.maxSizeOfInstructions = 0
+    font["hhea"].recalc(font)
+
+
 def set_metadata(font: TTFont, style: str, mapping: Mapping[int, str]) -> None:
     """Set reproducible names, style flags, and compact non-clipping metrics."""
     bold, italic = "Bold" in style, "Italic" in style
     hhea, os2, head = font["hhea"], font["OS/2"], font["head"]
-    hhea.ascent, hhea.descent, hhea.lineGap, hhea.advanceWidthMax = ASCENT, -DESCENT, 0, FULL_WIDTH
+    recompute_global_metrics(font)
+    hhea.ascent, hhea.descent, hhea.lineGap = ASCENT, -DESCENT, 0
     os2.version = max(os2.version, 4)
     os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap = ASCENT, -DESCENT, 0
     extents: list[tuple[int, int]] = []

@@ -262,9 +262,95 @@ def _contour_bounds(font: TTFont, glyph_name: str) -> tuple[tuple[int, int, int,
     return tuple(sorted(contours))
 
 
+def _computed_global_metrics(font: TTFont) -> dict[str, int]:
+    """Compute head, hhea, and maxp values directly from final glyph data."""
+    glyf, hmtx = font["glyf"], font["hmtx"]
+    bounds: list[tuple[int, int, int, int]] = []
+    widths: list[tuple[int, int, int]] = []
+    max_points = max_contours = max_composite_points = max_composite_contours = 0
+    max_component_elements = max_component_depth = 0
+    for glyph_name in font.getGlyphOrder():
+        glyph = glyf[glyph_name]
+        glyph.recalcBounds(glyf)
+        if glyph.numberOfContours > 0:
+            glyph_bounds = glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax
+            bounds.append(glyph_bounds)
+            points, contours = glyph.getMaxpValues()
+            max_points = max(max_points, points)
+            max_contours = max(max_contours, contours)
+        elif glyph.numberOfContours < 0:
+            glyph.recalcBounds(glyf)
+            bounds.append((glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax))
+            points, contours, depth = glyph.getCompositeMaxpValues(glyf)
+            max_composite_points = max(max_composite_points, points)
+            max_composite_contours = max(max_composite_contours, contours)
+            max_component_elements = max(max_component_elements, len(glyph.components))
+            max_component_depth = max(max_component_depth, depth)
+        if glyph.numberOfContours:
+            advance, side_bearing = hmtx.metrics[glyph_name]
+            width = glyph.xMax - glyph.xMin
+            widths.append((advance, side_bearing, width))
+
+    if bounds:
+        head_x_min = min(item[0] for item in bounds)
+        head_y_min = min(item[1] for item in bounds)
+        head_x_max = max(item[2] for item in bounds)
+        head_y_max = max(item[3] for item in bounds)
+    else:
+        head_x_min = head_y_min = head_x_max = head_y_max = 0
+    if widths:
+        hhea_min_lsb = min(item[1] for item in widths)
+        hhea_min_rsb = min(advance - side_bearing - width for advance, side_bearing, width in widths)
+        hhea_x_max_extent = max(side_bearing + width for _, side_bearing, width in widths)
+    else:
+        hhea_min_lsb = hhea_min_rsb = hhea_x_max_extent = 0
+    return {
+        "head.xMin": head_x_min,
+        "head.yMin": head_y_min,
+        "head.xMax": head_x_max,
+        "head.yMax": head_y_max,
+        "hhea.advanceWidthMax": max(advance for advance, _ in hmtx.metrics.values()),
+        "hhea.minLeftSideBearing": hhea_min_lsb,
+        "hhea.minRightSideBearing": hhea_min_rsb,
+        "hhea.xMaxExtent": hhea_x_max_extent,
+        "maxp.numGlyphs": len(font.getGlyphOrder()),
+        "maxp.maxPoints": max_points,
+        "maxp.maxContours": max_contours,
+        "maxp.maxCompositePoints": max_composite_points,
+        "maxp.maxCompositeContours": max_composite_contours,
+        "maxp.maxComponentElements": max_component_elements,
+        "maxp.maxComponentDepth": max_component_depth,
+    }
+
+
+def _validate_lsb_consistency(font: TTFont, font_name: str) -> None:
+    """Require saved head.flags bit 1 and LSBs equal to final outline xMin."""
+    head = font["head"]
+    if not head.flags & (1 << 1):
+        raise AssertionError(f"{font_name} head.flags bit 1 is not set")
+
+    glyf, hmtx = font["glyf"], font["hmtx"]
+    outlined = mismatches = 0
+    samples: list[str] = []
+    for glyph_name in font.getGlyphOrder():
+        glyph = glyf[glyph_name]
+        if glyph.numberOfContours == 0:
+            continue
+        outlined += 1
+        glyph.recalcBounds(glyf)
+        lsb = hmtx.metrics[glyph_name][1]
+        if lsb != glyph.xMin:
+            mismatches += 1
+            if len(samples) < 4:
+                samples.append(f"{glyph_name}({lsb}!={glyph.xMin})")
+    if mismatches:
+        sample_text = ", ".join(samples)
+        raise AssertionError(f"{font_name} hmtx LSB/xMin mismatches: {mismatches}/{outlined}; samples: {sample_text}")
+
+
 def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ...]:
     """Validate one compiled TrueType font."""
-    with closing(TTFont(path)) as font:
+    with closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)) as font:
         cmap, os2, head, hhea = font.getBestCmap(), font["OS/2"], font["head"], font["hhea"]
         subfamily = "Bold Italic" if style == "BoldItalic" else style
         bold, italic = "Bold" in style, "Italic" in style
@@ -286,6 +372,37 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
         expect(bool(os2.fsSelection & (1 << 5)), bold, f"{path.name} OS/2 bold flag")
         expect(bool(os2.fsSelection & (1 << 0)), italic, f"{path.name} OS/2 italic flag")
 
+        _validate_lsb_consistency(font, path.name)
+        computed = _computed_global_metrics(font)
+        for field, actual in (
+            ("head.xMin", head.xMin),
+            ("head.yMin", head.yMin),
+            ("head.xMax", head.xMax),
+            ("head.yMax", head.yMax),
+            ("hhea.advanceWidthMax", hhea.advanceWidthMax),
+            ("hhea.minLeftSideBearing", hhea.minLeftSideBearing),
+            ("hhea.minRightSideBearing", hhea.minRightSideBearing),
+            ("hhea.xMaxExtent", hhea.xMaxExtent),
+            ("maxp.numGlyphs", font["maxp"].numGlyphs),
+            ("maxp.maxPoints", font["maxp"].maxPoints),
+            ("maxp.maxContours", font["maxp"].maxContours),
+            ("maxp.maxCompositePoints", font["maxp"].maxCompositePoints),
+            ("maxp.maxCompositeContours", font["maxp"].maxCompositeContours),
+            ("maxp.maxComponentElements", font["maxp"].maxComponentElements),
+            ("maxp.maxComponentDepth", font["maxp"].maxComponentDepth),
+        ):
+            expect(actual, computed[field], f"{path.name} recomputed {field}")
+        for field in (
+            "maxZones",
+            "maxTwilightPoints",
+            "maxStorage",
+            "maxFunctionDefs",
+            "maxInstructionDefs",
+            "maxStackElements",
+            "maxSizeOfInstructions",
+        ):
+            expect(getattr(font["maxp"], field), 1 if field == "maxZones" else 0, f"{path.name} stripped maxp {field}")
+
         widths = {font["hmtx"][glyph][0] for glyph in set(cmap.values())}
         if unexpected := widths - {0, 512, 1024}:
             raise AssertionError(f"{path.name} has unexpected advances: {sorted(unexpected)}")
@@ -296,7 +413,6 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             raise AssertionError(f"{path.name} lacks: {', '.join(missing)}")
         if len(cmap) < 15_000:
             raise AssertionError(f"{path.name} maps only {len(cmap)} Unicode codepoints")
-
         for codepoint, glyph_name in cmap.items():
             expect(
                 font["hmtx"].metrics[glyph_name][0],
@@ -315,6 +431,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             0,
             f"{path.name} U+0311 combining advance",
         )
+
         extents = [_bounds(font, glyph)[1::2] for glyph in set(cmap.values())]
         min_y, max_y = min(low for low, _ in extents), max(high for _, high in extents)
         if min_y < -220 or max_y > 920:
