@@ -13,7 +13,8 @@ Latin and Japanese glyphs are balanced instead of being forced into the same bou
 - **Optical scale:** Ubuntu Mono ASCII is 103% vertically and 100% horizontally; adjusted Cyroit Japanese remains at 100%; direct BIZ UDGothic and IBM Plex Sans JP fallbacks are scaled to 87% and 90%, respectively.
 - **Line metrics:** Ascent 850, descent 174, and line gap 0 produce an exact 1-em line height while keeping Latin, kana, and kanji visually aligned.
 - **Terminal symbols:** U+2460–U+2473 retain the complete IBM Plex Sans JP outlines with PlemolJP Console's familiar 67%-horizontal/90%-vertical enclosed-number proportions, recentered on the half-width cell. Basic arrows, the exact-mirror ⇐/⇒ pair, and an audited set of 24 common geometric, weather, phone, music, and temperature symbols stay inside that cell so Ghostty does not rescale them when neighboring cells change.
-- **Terminal geometry:** Cyroit box drawing is grid-fitted across U+2500–U+257F, while solid Block Elements are generated on exact half-, quarter-, and eighth-cell boundaries.
+- **Terminal geometry:** Cyroit box drawing is grid-fitted across U+2500–U+257F, while solid Block Elements are generated on exact half-, quarter-, and eighth-cell boundaries. Ghostty 1.3.1 renders U+2500–U+259F with internal sprites by default; the font's own outlines are available through the optional override below.
+- **Full-width space:** U+3000 intentionally has a visible four-corner marker as a coding aid, making otherwise blank cells easy to spot.
 
 > [!NOTE]
 > Ghostty 1.3.1 applies contextual fitting to symbol-like codepoints, including arrows and enclosed alphanumerics.
@@ -61,6 +62,12 @@ Configure Ghostty to use the family:
 
 ```ini
 font-family = Summer Ghost
+```
+
+Ghostty 1.3.1 uses internal sprites for U+2500–U+259F by default. Add this optional override only if you want Summer Ghost's own box/block outlines:
+
+```ini
+font-codepoint-map = U+2500-U+259F=Summer Ghost
 ```
 
 Run `make help` to see the available commands and how to override the installation directory.
