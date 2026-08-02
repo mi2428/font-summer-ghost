@@ -39,21 +39,21 @@ download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd3024
 download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf
 
 === Regular ===
-wrote    SummerGhost-Regular.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Regular.ttf: 16,713 codepoints, IBM fallback 3,637, UVS 9,689
 
 === Bold ===
-wrote    SummerGhost-Bold.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Bold.ttf: 16,713 codepoints, IBM fallback 3,637, UVS 9,689
 
 === Italic ===
-wrote    SummerGhost-Italic.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Italic.ttf: 16,713 codepoints, IBM fallback 3,637, UVS 9,689
 
 === BoldItalic ===
-wrote    SummerGhost-BoldItalic.ttf: 16,711 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-BoldItalic.ttf: 16,713 codepoints, IBM fallback 3,637, UVS 9,689
 wrote    dist/provenance.json
-ok       SummerGhost-Regular.ttf: 16,711 codepoints, 16,809 glyphs, 6 selectors
-ok       SummerGhost-Bold.ttf: 16,711 codepoints, 16,809 glyphs, 6 selectors
-ok       SummerGhost-Italic.ttf: 16,711 codepoints, 16,814 glyphs, 6 selectors
-ok       SummerGhost-BoldItalic.ttf: 16,711 codepoints, 16,814 glyphs, 6 selectors
+ok       SummerGhost-Regular.ttf: 16,713 codepoints, 16,811 glyphs, 6 selectors
+ok       SummerGhost-Bold.ttf: 16,713 codepoints, 16,811 glyphs, 6 selectors
+ok       SummerGhost-Italic.ttf: 16,713 codepoints, 16,816 glyphs, 6 selectors
+ok       SummerGhost-BoldItalic.ttf: 16,713 codepoints, 16,816 glyphs, 6 selectors
 validated Summer Ghost Regular/Bold/Italic/BoldItalic
 Installed Summer Ghost into ~/Library/Fonts
 ```
