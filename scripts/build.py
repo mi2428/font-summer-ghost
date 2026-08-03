@@ -6,15 +6,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import shutil
+import stat
 import urllib.request
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from contextlib import ExitStack, closing
 from dataclasses import asdict, dataclass
-from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import unicodedata2 as unicodedata
@@ -25,26 +26,18 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
-from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
 from fontTools.ttLib.tables.O_S_2f_2 import calcCodePageRanges, intersectUnicodeRanges
-from pathops import Path as PathOpsPath
-from pathops import PathPen, intersection, union
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE, DIST = ROOT / ".cache", ROOT / "dist"
 DOWNLOADS, SOURCES = CACHE / "downloads", CACHE / "sources"
 FAMILY, PS_FAMILY, VERSION = "Summer Ghost", "SummerGhost", "0.1.0"
 UPM, HALF_WIDTH, FULL_WIDTH = 1024, 512, 1024
-ASCENT, DESCENT, UBUNTU_VERTICAL_SCALE = 850, 174, 1.03
-HORIZONTAL_ARROW_INK_WIDTH = 500
+ASCENT, DESCENT, ASCII_VERTICAL_SCALE = 850, 174, 1.03
 CELL_FIT_INK_WIDTH = 500
-ARROW_HEAD_DEPTH_RATIO = 0.80
 BASIC_ARROWS = frozenset(range(0x2190, 0x2194))
 RETURN_ARROW_CODEPOINT = 0x21B5
 RETURN_SYMBOL_CODEPOINT = 0x23CE
-CYROIT_TERMINAL_SYMBOLS = BASIC_ARROWS | {RETURN_ARROW_CODEPOINT}
-HORIZONTAL_ARROWS = {0x2190: True, 0x2192: False}
-MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
 ENCLOSED_DIGITS = range(0x2460, 0x2474)
 PLEMOL_REFERENCE_UPM = 1000
 PLEMOL_ENCLOSED_X_SCALE = 0.67
@@ -68,13 +61,36 @@ GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
     }
 )
 EVERYDAY_CELL_FIT_SYMBOLS = frozenset({0x203B, 0x2103, 0x2109, 0x2600, 0x2601, 0x2602, 0x260E, 0x266A, 0x266F, 0x2713})
-CYROIT_BOX_BOUNDS = (-89, -420, 601, 1014)
-CYROIT_LEGACY_CENTERING_ADVANCE = {0x29FCE: 1145, 0x29FD7: 1145}
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
-SOURCE_ORDER = ("ubuntu", "cyroit", "biz", "ibm")
+MPLUS1P_COMMIT = "2796410152d4f9524b68ed46e69c1b60f8e0f7c3"
+NINJAL_TTF_SHA256 = "e1301406c49dffed801bc12f0bb6a148f90215d4cf7d3a7bb0831cd798f6345e"
+NINJAL_CODEPOINTS = frozenset({0x3099, 0x309A, *range(0x1B001, 0x1B11F)})
+CJK_RANGES = (
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0xF900, 0xFAFF),
+    (0x20000, 0x2EE5F),
+    (0x2F800, 0x2FA1F),
+    (0x30000, 0x323AF),
+)
+ORPHAN_CODEPOINTS = frozenset(
+    {
+        *range(0x2FF0, 0x3000),
+        0x31EF,
+        *range(0x1B120, 0x1B129),
+        *range(0x1B130, 0x1B169),
+        0x2A708,
+        0x2CEFF,
+        0x2CF00,
+        0x2CF02,
+    }
+)
+if len(ORPHAN_CODEPOINTS) != 87:
+    raise AssertionError("ORPHAN_CODEPOINTS must contain exactly 87 codepoints")
+SOURCE_ORDER = ("ubuntu", "mplus1p", "ninjal", "biz", "ibm")
 PROVENANCE_ORIGINS = (*SOURCE_ORDER, "generated")
-SOURCE_SCALES = {"cyroit": 1.0, "biz": 0.87, "ibm": 0.90}
-SOURCE_PREFIXES = {"cyroit": "j", "biz": "b", "ibm": "i"}
+SOURCE_SCALES = {"mplus1p": 1.0, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90}
+SOURCE_PREFIXES = {"mplus1p": "m", "biz": "b", "ninjal": "n", "ibm": "i"}
 JAPANESE_RANGES = (
     (0x2E80, 0x2FFF),
     (0x3000, 0x30FF),
@@ -91,7 +107,6 @@ JAPANESE_RANGES = (
     (0x2F800, 0x2FA1F),
     (0x30000, 0x323AF),
 )
-UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_SOURCE = 0xFF5F
 FULL_WIDTH_OVERRIDES = frozenset({0x2985, 0x2986})
 
@@ -159,9 +174,19 @@ ASSETS: tuple[Asset, ...] = (
         "61a2b342526fd552f19fef438bb9211a8212de19ad96e32a1209c039f1d68ecf",
     ),
     Asset(
-        "Cyroit_v3.11.0.zip",
-        "https://github.com/omonomo/Cyroit/releases/download/v3.11.0/Cyroit_v3.11.0.zip",
-        "88d92d9bc972783bb1467188e17ffe4b63fcaffd1c2d5d183dfe1337ebafaa81",
+        "MPLUS1p-Regular.ttf",
+        f"https://raw.githubusercontent.com/google/fonts/{MPLUS1P_COMMIT}/ofl/mplus1p/MPLUS1p-Regular.ttf",
+        "2f294ad496432b1608f070d310e3aa2adcf1de4af429f4901df97ec4bd361ed1",
+    ),
+    Asset(
+        "MPLUS1p-Bold.ttf",
+        f"https://raw.githubusercontent.com/google/fonts/{MPLUS1P_COMMIT}/ofl/mplus1p/MPLUS1p-Bold.ttf",
+        "76eb077b0a31ca33ca40238e47da5a17e2786741607cec09678d7d2e5ab1afc1",
+    ),
+    Asset(
+        "ninjal_hentaigana.zip",
+        "https://cid.ninjal.ac.jp/kana/ninjal_hentaigana.zip",
+        "62b01c19cb40dc4b64b1e1da776fca483e19e21c2772cc3f9db9a067bedbc84d",
     ),
     Asset(
         "BIZUDGothic-1.051.zip",
@@ -187,10 +212,11 @@ STYLE_PARTS = {
     "Italic": ("RI", "Regular"),
     "BoldItalic": ("BI", "Bold"),
 }
-STYLES: Mapping[str, tuple[str, str, str, str]] = {
+STYLES: Mapping[str, tuple[str, str, str, str, str]] = {
     style: (
         f"UbuntuMono-{ubuntu}.ttf",
-        f"BS/CyroitBS-{weight}.ttf",
+        f"MPLUS1p-{weight}.ttf",
+        "ninjal_hentaigana.ttf",
         f"BIZUDGothic-{weight}.ttf",
         f"IBMPlexSansJP-{weight}.ttf",
     )
@@ -229,6 +255,65 @@ def _download(asset: Asset) -> None:
         raise
 
 
+MAX_ARCHIVE_UNCOMPRESSED_SIZE = 512 * 1024 * 1024
+
+
+def _safe_extract_zip(archive: Path, destination: Path) -> None:
+    """Extract a verified archive through controlled, regular-file paths only."""
+    destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve()
+    seen: set[Path] = set()
+    total_size = 0
+    with zipfile.ZipFile(archive) as bundle:
+        for info in sorted(bundle.infolist(), key=lambda item: item.filename):
+            name = info.filename
+            posix_name = PurePosixPath(name)
+            windows_name = PureWindowsPath(name)
+            if (
+                not name
+                or "\x00" in name
+                or "\\" in name
+                or posix_name.is_absolute()
+                or windows_name.is_absolute()
+                or windows_name.drive
+                or any(part in {"", ".", ".."} for part in posix_name.parts)
+            ):
+                raise ValueError(f"Unsafe archive member path: {name!r}")
+            relative = Path(*posix_name.parts)
+            target = destination.joinpath(relative)
+            try:
+                target.resolve().relative_to(root)
+            except ValueError as exc:
+                raise ValueError(f"Archive member escapes destination: {name!r}") from exc
+            if relative in seen:
+                raise ValueError(f"Duplicate archive member path: {name!r}")
+            seen.add(relative)
+
+            mode = stat.S_IFMT(info.external_attr >> 16)
+            if mode not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError(f"Unsupported archive member type: {name!r}")
+            if info.is_dir():
+                if mode not in (0, stat.S_IFDIR):
+                    raise ValueError(f"Unsupported archive directory type: {name!r}")
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if mode == stat.S_IFDIR:
+                raise ValueError(f"Directory member lacks directory marker: {name!r}")
+            if info.file_size < 0 or total_size + info.file_size > MAX_ARCHIVE_UNCOMPRESSED_SIZE:
+                raise ValueError(f"Archive exceeds {MAX_ARCHIVE_UNCOMPRESSED_SIZE} uncompressed bytes")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            written = 0
+            with bundle.open(info) as source, target.open("wb") as output:
+                while chunk := source.read(1 << 20):
+                    written += len(chunk)
+                    if written > info.file_size or total_size + written > MAX_ARCHIVE_UNCOMPRESSED_SIZE:
+                        raise ValueError(f"Archive member exceeds declared size: {name!r}")
+                    output.write(chunk)
+            if written != info.file_size:
+                raise ValueError(f"Archive member size mismatch: {name!r}")
+            total_size += written
+
+
 def fetch_sources() -> Mapping[str, Path]:
     """Fetch, verify, and extract every pinned source."""
     DOWNLOADS.mkdir(parents=True, exist_ok=True)
@@ -236,24 +321,24 @@ def fetch_sources() -> Mapping[str, Path]:
     for asset in ASSETS:
         _download(asset)
 
-    archive_key = hashlib.sha256(
-        "".join(asset.sha256 for asset in ASSETS if asset.name.endswith(".zip")).encode()
-    ).hexdigest()[:12]
+    archive_key = hashlib.sha256("".join(f"{asset.name}:{asset.sha256}" for asset in ASSETS).encode()).hexdigest()[:12]
     extracted = SOURCES / f"extracted-{archive_key}"
-    if not (extracted / ".complete").is_file():
-        shutil.rmtree(extracted, ignore_errors=True)
-        extracted.mkdir(parents=True)
-        for archive, directory in (
-            ("ubuntu-font-family-0.83.zip", "ubuntu"),
-            ("Cyroit_v3.11.0.zip", "cyroit"),
-            ("BIZUDGothic-1.051.zip", "biz"),
-        ):
-            with zipfile.ZipFile(DOWNLOADS / archive) as bundle:
-                bundle.extractall(extracted / directory)
-        (extracted / ".complete").touch()
+    shutil.rmtree(extracted, ignore_errors=True)
+    extracted.mkdir(parents=True)
+    for archive, directory in (
+        ("ubuntu-font-family-0.83.zip", "ubuntu"),
+        ("ninjal_hentaigana.zip", "ninjal"),
+        ("BIZUDGothic-1.051.zip", "biz"),
+    ):
+        _safe_extract_zip(DOWNLOADS / archive, extracted / directory)
+
+    ninjal_matches = sorted((extracted / "ninjal").rglob("ninjal_hentaigana.ttf"))
+    if len(ninjal_matches) != 1 or file_sha256(ninjal_matches[0]) != NINJAL_TTF_SHA256:
+        raise RuntimeError("NINJAL TTF is missing or has an unexpected SHA-256")
     return {
         "ubuntu": extracted / "ubuntu" / "ubuntu-font-family-0.83",
-        "cyroit": extracted / "cyroit",
+        "mplus1p": DOWNLOADS,
+        "ninjal": ninjal_matches[0].parent,
         "biz": extracted / "biz",
         "ibm": DOWNLOADS,
     }
@@ -274,16 +359,32 @@ def cell_width(codepoint: int) -> int:
     return FULL_WIDTH if unicodedata.east_asian_width(char) in {"W", "F"} else HALF_WIDTH
 
 
-def is_adjusted_japanese(codepoint: int) -> bool:
-    """Select Cyroit's adjusted Japanese repertoire and terminal symbols."""
+def is_mplus1p_japanese(codepoint: int) -> bool:
+    """Select non-Han Japanese glyphs from the pinned M PLUS base."""
     excluded = codepoint in {0x309B, 0x309C} or 0xFF65 <= codepoint <= 0xFF9F
-    return codepoint in CYROIT_TERMINAL_SYMBOLS or (
-        not excluded and any(start <= codepoint <= end for start, end in JAPANESE_RANGES)
+    is_han = any(start <= codepoint <= end for start, end in CJK_RANGES)
+    return (
+        not excluded
+        and codepoint not in NINJAL_CODEPOINTS
+        and not is_han
+        and any(start <= codepoint <= end for start, end in JAPANESE_RANGES)
     )
 
 
-def scale_ubuntu_ascii(font: TTFont) -> None:
-    """Apply Ubroit's 103% vertical scale to printable ASCII only."""
+def is_ninjal_hentaigana(codepoint: int) -> bool:
+    """Select the complete 288-codepoint hentaigana layer."""
+    return codepoint in NINJAL_CODEPOINTS
+
+
+def remove_orphans(mapping: MutableMapping[int, str], origins: MutableMapping[int, str]) -> None:
+    """Drop the explicitly unowned 87 codepoints from every source and final cmap."""
+    for codepoint in ORPHAN_CODEPOINTS:
+        mapping.pop(codepoint, None)
+        origins.pop(codepoint, None)
+
+
+def scale_ascii(font: TTFont) -> None:
+    """Apply the established 103% vertical fit to printable ASCII only."""
     glyph_set, order = font.getGlyphSet(), font.getGlyphOrder()
     scaled = {name for cp, name in font.getBestCmap().items() if 0x20 <= cp <= 0x7E}
     transformed: dict[str, Any] = {}
@@ -291,7 +392,7 @@ def scale_ubuntu_ascii(font: TTFont) -> None:
     for name in order:
         recording, pen = DecomposingRecordingPen(glyph_set), TTGlyphPen(None)
         glyph_set[name].draw(recording)
-        scale_y = UBUNTU_VERTICAL_SCALE if name in scaled else 1.0
+        scale_y = ASCII_VERTICAL_SCALE if name in scaled else 1.0
         recording.replay(TransformPen(pen, (1, 0, 0, scale_y, 0, 0)))
         transformed[name] = pen.glyph()
     font["glyf"].glyphs = transformed
@@ -330,33 +431,37 @@ def _replay_transformed(
             raise ValueError(f"Unsupported outline operation {operation}")
 
 
-def _scratch_glyph(font: TTFont, codepoint: int, move_x: int = 0) -> Any:
+def _scratch_glyph(font: TTFont, codepoint: int) -> Any:
     """Decompose one Ubuntu ASCII glyph into an independent scratch outline."""
     name = font.getBestCmap()[codepoint]
     recording, pen = DecomposingRecordingPen(font.getGlyphSet()), TTGlyphPen(None)
     font.getGlyphSet()[name].draw(recording)
-    recording.replay(TransformPen(pen, (1, 0, 0, 1, move_x, 0)))
+    recording.replay(TransformPen(pen, (1, 0, 0, 1, 0, 0)))
     return pen.glyph()
 
 
-def _superscript_glyph(glyph: Any, pre_final_move_y: int = 0) -> Any:
-    """Apply the Ubroit-compatible superscript transform in its specified order."""
+def _modifier_fit_glyph(glyph: Any) -> Any:
+    """Fit one Ubuntu outline into the documented modifier envelope."""
+    bounds_pen = BoundsPen({"scratch": glyph})
+    glyph.draw(bounds_pen, None)
+    if bounds_pen.bounds is None:
+        return glyph
+    x_min, y_min, x_max, y_max = bounds_pen.bounds
+    target_x_min, target_y_min, target_x_max, target_y_max = (56, 320, 456, 760)
+    scale = min(
+        (target_x_max - target_x_min) / max(x_max - x_min, 1),
+        (target_y_max - target_y_min) / max(y_max - y_min, 1),
+    )
+    x_offset = target_x_min + (target_x_max - target_x_min - (x_max - x_min) * scale) / 2 - x_min * scale
+    y_offset = target_y_min + (target_y_max - target_y_min - (y_max - y_min) * scale) / 2 - y_min * scale
     recording = DecomposingRecordingPen({"scratch": glyph})
     glyph.draw(recording, None)
-
-    def transform(point: tuple[float, float]) -> tuple[float, float]:
-        x, y = point
-        x = 0.64 * (x - 256) + 256
-        y = 0.54 * y
-        y += 282
-        x = 1.34 * (x - 256) + 256
-        y = 1.34 * (y - 462) + 462
-        y += pre_final_move_y
-        y *= 1.03
-        return round(x), round(y)
-
     pen = TTGlyphPen(None)
-    _replay_transformed(recording, pen, transform)
+    _replay_transformed(
+        recording,
+        pen,
+        lambda point: (round(point[0] * scale + x_offset), round(point[1] * scale + y_offset)),
+    )
     return pen.glyph()
 
 
@@ -367,123 +472,80 @@ def _transform_glyph(glyph: Any, transform: tuple[float, float, float, float, fl
     return pen.glyph()
 
 
-def _path_glyph(glyph: Any) -> PathOpsPath:
-    path = PathOpsPath()
-    glyph.draw(PathPen(path), None)
-    return path
-
-
-def _boolean_glyph(subject: Any, clips: Iterable[Any], operation: str) -> Any:
-    """Isolated skia-pathops Boolean helper for the generator's cut/paste edits."""
-    out = PathOpsPath()
-    subject_path, clip_paths = _path_glyph(subject), [_path_glyph(glyph) for glyph in clips]
-    if operation == "union":
-        union([subject_path, *clip_paths], PathPen(out))
-    else:
-        intersection([subject_path], clip_paths, PathPen(out))
+def _make_polygon_glyph(points: Iterable[tuple[int, int]]) -> Any:
+    """Build one closed polygon outline."""
     pen = TTGlyphPen(None)
-    out.draw(pen)
-    glyph = pen.glyph()
-    points, ends, flags = glyph.getCoordinates(None)
-    glyph.coordinates = GlyphCoordinates([(round(x), round(y)) for x, y in points])
-    glyph.endPtsOfContours, glyph.flags = ends, flags
-    return glyph
-
-
-def _rectangle_glyph(rectangles: Iterable[tuple[int, int, int, int]]) -> Any:
-    pen = TTGlyphPen(None)
-    for x0, y0, x1, y1 in rectangles:
-        pen.moveTo((x0, y0))
-        pen.lineTo((x1, y0))
-        pen.lineTo((x1, y1))
-        pen.lineTo((x0, y1))
-        pen.closePath()
+    points = tuple(points)
+    pen.moveTo(points[0])
+    for point in points[1:]:
+        pen.lineTo(point)
+    pen.closePath()
     return pen.glyph()
+
+
+def _draw_rectangle(pen: TTGlyphPen, rectangle: tuple[int, int, int, int]) -> None:
+    x_min, y_min, x_max, y_max = rectangle
+    pen.moveTo((x_min, y_min))
+    pen.lineTo((x_max, y_min))
+    pen.lineTo((x_max, y_max))
+    pen.lineTo((x_min, y_max))
+    pen.closePath()
+
+
+def _draw_polygon(pen: TTGlyphPen, points: Iterable[tuple[int, int]]) -> None:
+    points = tuple(points)
+    pen.moveTo(points[0])
+    for point in points[1:]:
+        pen.lineTo(point)
+    pen.closePath()
+
+
+def _make_check_mark_glyph(bold: bool) -> Any:
+    """Build a conventional, source-independent check mark."""
+    half = 42 if bold else 32
+    left_normal = (round(half * 0.92), round(half * 0.39))
+    right_normal = (-round(half * 0.85), round(half * 0.53))
+    left = (64, 480)
+    valley = (180, 180)
+    right = (472, 700)
+    ln_x, ln_y = left_normal
+    rn_x, rn_y = right_normal
+    return _make_polygon_glyph(
+        (
+            (left[0] + ln_x, left[1] + ln_y),
+            (valley[0] + ln_x, valley[1] + ln_y),
+            (right[0] + rn_x, right[1] + rn_y),
+            (right[0] - rn_x, right[1] - rn_y),
+            (valley[0] - rn_x, valley[1] - rn_y),
+            (valley[0] - ln_x, valley[1] - ln_y),
+            (left[0] - ln_x, left[1] - ln_y),
+        )
+    )
 
 
 def _make_neovim_glyphs(
     target: TTFont,
-    cyroit: TTFont,
     scratch_font: TTFont,
     cmap: MutableMapping[int, str],
     origins: MutableMapping[int, str],
     italic: bool,
     bold: bool,
 ) -> None:
-    """Install the 43 Ubuntu-derived Neovim symbols and Cyroit check mark."""
-    edited = {0x42, 0x44, 0x50, 0x52, 0x69, 0x72}
+    """Install the 43 Ubuntu-derived Neovim modifier symbols and check mark."""
     scratch: dict[int, Any] = {}
     for cp in sorted(set(NEOVIM_GLYPHS.values())):
-        scratch[cp] = _scratch_glyph(scratch_font, cp, 10 if cp in edited else 0)
-    # Reproduce the small source edits used by Ubroit's generator before sups.
-    macron = _transform_glyph(_scratch_glyph(scratch_font, 0x00AF), (0.50, 0, 0, 1.10, 0, 0))
-    offsets = ((145, -323), (115, -323)) if not bold else ((140, -336), (85, -336))
-    scratch[0x47] = _boolean_glyph(
-        scratch[0x47], (_transform_glyph(macron, (1, 0, 0, 1, x, y)) for x, y in offsets), "union"
-    )
-    block = _scratch_glyph(scratch_font, 0x2588)
-    j_x = 170 if not bold else 150
-    j_mask = _boolean_glyph(
-        _transform_glyph(block, (1, 0, 0, 1, j_x, 0)),
-        (_transform_glyph(block, (1, 0, 0, 1, 0, -450)), _transform_glyph(block, (1, 0, 0, 1, 0, 810))),
-        "union",
-    )
-    scratch[0x4A] = _boolean_glyph(scratch[0x4A], (j_mask,), "intersection")
-    m_block = _transform_glyph(block, (0.25, 0, 0, 0.20, 256 * 0.75, 338 * 0.80 - 160))
-    m_fragment = _boolean_glyph(scratch[0x6D], (m_block,), "intersection")
-    scratch[0x6D] = _boolean_glyph(scratch[0x6D], (_transform_glyph(m_fragment, (1, 0, 0, 1, 0, -80)),), "union")
-    # Stored V remains the original V, and stored D is the +10-X form without its bar.
-    scratch[0x56] = _scratch_glyph(scratch_font, 0x56)
-    # The source generator widens hyphen-minus before making its superscript.
-    for cp, factor in ((0x2D, 1.25 if bold else 1.50),):
-        recording, pen = DecomposingRecordingPen({"scratch": scratch[cp]}), TTGlyphPen(None)
-        scratch[cp].draw(recording, None)
-        recording.replay(TransformPen(pen, (factor, 0, 0, 1, 256 * (1 - factor), 0)))
-        scratch[cp] = pen.glyph()
+        scratch[cp] = _scratch_glyph(scratch_font, cp)
     for target_cp, base_cp in NEOVIM_GLYPHS.items():
-        glyph = _superscript_glyph(scratch[base_cp], 10 if target_cp == 0x207B else 0)
         if italic:
-            glyph = _boolean_glyph(_transform_glyph(glyph, (1, 0, 0.16, 1, -48, 0)), (), "union")
+            scratch[base_cp] = _transform_glyph(scratch[base_cp], (1, 0, 0.16, 1, -48, 0))
+        glyph = _modifier_fit_glyph(scratch[base_cp])
         cmap.pop(target_cp, None)
         _set_mapped_glyph(target, cmap, target_cp, glyph, "generated")
         origins[target_cp] = "generated"
 
-    source_cmap, source_set = cyroit.getBestCmap(), cyroit.getGlyphSet()
-    source_name = source_cmap.get(NEOVIM_CHECK)
-    if source_name is None:
-        raise ValueError("Cyroit source lacks U+2714")
-    recording, pen = DecomposingRecordingPen(source_set), TTGlyphPen(None)
-    source_set[source_name].draw(recording)
-    recording.replay(pen)
     cmap.pop(NEOVIM_CHECK, None)
-    _set_mapped_glyph(target, cmap, NEOVIM_CHECK, pen.glyph(), "cyroit")
-    origins[NEOVIM_CHECK] = "cyroit"
-
-
-def _shorten_left_arrow_point(
-    point: tuple[float, float],
-    *,
-    x_min: float,
-    head_depth: float,
-    shaft_factor: float,
-    target_left: float,
-) -> tuple[float, float]:
-    """Shorten a left-facing arrow shaft while preserving its head."""
-    x, y = point
-    distance = x - x_min
-    if distance > head_depth:
-        distance = head_depth + (distance - head_depth) * shaft_factor
-    return target_left + distance, y
-
-
-def _mirror_transformed_point(
-    point: tuple[float, float],
-    *,
-    transform_point: Callable[[tuple[float, float]], tuple[float, float]],
-) -> tuple[float, float]:
-    """Mirror a transformed point around the half-width cell center."""
-    x, y = transform_point(point)
-    return HALF_WIDTH - x, y
+    _set_mapped_glyph(target, cmap, NEOVIM_CHECK, _make_check_mark_glyph(bold), "generated")
+    origins[NEOVIM_CHECK] = "generated"
 
 
 def _set_mapped_glyph(
@@ -495,13 +557,18 @@ def _set_mapped_glyph(
     width: int = HALF_WIDTH,
 ) -> bool:
     """Replace or add one mapped glyph; return whether it was added."""
-    if glyph_name := cmap.get(codepoint):
-        _replace_glyph(font, glyph_name, glyph)
-        return False
+    existing_name = cmap.get(codepoint)
+    if existing_name is not None:
+        shared = any(other_cp != codepoint and other_name == existing_name for other_cp, other_name in cmap.items())
+        if not shared:
+            _replace_glyph(font, existing_name, glyph)
+            return False
 
     glyph_name = f"sg.{prefix}.{codepoint:04X}"
-    if glyph_name in font["glyf"].glyphs:
-        raise ValueError(f"Duplicate generated glyph name {glyph_name}")
+    suffix = 1
+    while glyph_name in font["glyf"].glyphs:
+        glyph_name = f"sg.{prefix}.{codepoint:04X}.{suffix}"
+        suffix += 1
     glyph.recalcBounds(font["glyf"])
     font["glyf"].glyphs[glyph_name] = glyph
     order = font.getGlyphOrder()
@@ -514,29 +581,287 @@ def _set_mapped_glyph(
 
 def replace_box_drawing(
     font: TTFont,
-    source: TTFont,
     cmap: MutableMapping[int, str],
     origins: MutableMapping[int, str],
+    bold: bool,
 ) -> None:
-    """Map Cyroit's complete box-drawing grid exactly onto terminal cells."""
-    source_cmap, glyph_set = source.getBestCmap(), source.getGlyphSet()
-    source_x_min, source_y_min, source_x_max, source_y_max = CYROIT_BOX_BOUNDS
-    scale_x = HALF_WIDTH / (source_x_max - source_x_min)
-    scale_y = (ASCENT + DESCENT) / (source_y_max - source_y_min)
-    transform = (
-        scale_x,
-        0,
-        0,
-        scale_y,
-        -source_x_min * scale_x,
-        -DESCENT - source_y_min * scale_y,
-    )
+    """Generate box drawings with style-aware, cell-proportional strokes."""
+    center_x, center_y = HALF_WIDTH // 2, (ASCENT - DESCENT) // 2
+    bottom, top = -DESCENT, ASCENT
+    light_thickness = round(HALF_WIDTH * (0.22 if bold else 0.17))
+    heavy_thickness = light_thickness * 2
+    double_rail_thickness = max(32, light_thickness // 2)
+    double_rail_gap = max(24, light_thickness // 3)
+    double_rail_offset = double_rail_thickness // 2 + double_rail_gap // 2
+
+    def line_polygon(start: tuple[int, int], end: tuple[int, int], thickness: int) -> tuple[tuple[int, int], ...]:
+        x0, y0 = start
+        x1, y1 = end
+        if x0 == x1:
+            half = thickness // 2
+            return ((x0 - half, y0), (x1 - half, y1), (x1 + half, y1), (x0 + half, y0))
+        if y0 == y1:
+            half = thickness // 2
+            return ((x0, y0 - half), (x1, y1 - half), (x1, y1 + half), (x0, y0 + half))
+        half = max(1, thickness // 2)
+        # Box diagonals are 45-degree strokes; offset in both axes and clamp
+        # each endpoint to the terminal cell so corner ink never overflows.
+        normal = max(1, (half * 181 + 128) // 256)
+        if y1 > y0:
+            nx, ny = -normal, normal
+        else:
+            nx, ny = normal, normal
+        raw_points: tuple[tuple[int, int], ...] = (
+            (x0 + nx, y0 + ny),
+            (x1 + nx, y1 + ny),
+            (x1 - nx, y1 - ny),
+            (x0 - nx, y0 - ny),
+        )
+        return tuple((max(0, min(HALF_WIDTH, x)), max(bottom, min(top, y))) for x, y in raw_points)
+
+    def draw_horizontal(pen: TTGlyphPen, x_min: int, x_max: int, y: int, thickness: int, dash_count: int) -> None:
+        spans: tuple[tuple[int, int], ...] = ((x_min, x_max),)
+        if dash_count:
+            span_length = x_max - x_min
+            denominator = 2 * dash_count - 1
+            dashed_spans: list[tuple[int, int]] = []
+            for i in range(dash_count):
+                span_min = x_min + span_length * (2 * i) // denominator
+                span_max = x_min + span_length * (2 * i + 1) // denominator
+                if span_max > span_min:
+                    dashed_spans.append((span_min, span_max))
+            spans = tuple(dashed_spans)
+        for span_min, span_max in spans:
+            _draw_rectangle(pen, (span_min, y - thickness // 2, span_max, y + thickness // 2))
+
+    def draw_vertical(pen: TTGlyphPen, y_min: int, y_max: int, x: int, thickness: int, dash_count: int) -> None:
+        spans: tuple[tuple[int, int], ...] = ((y_min, y_max),)
+        if dash_count:
+            span_length = y_max - y_min
+            denominator = 2 * dash_count - 1
+            dashed_spans: list[tuple[int, int]] = []
+            for i in range(dash_count):
+                span_min = y_min + span_length * (2 * i) // denominator
+                span_max = y_min + span_length * (2 * i + 1) // denominator
+                if span_max > span_min:
+                    dashed_spans.append((span_min, span_max))
+            spans = tuple(dashed_spans)
+        for span_min, span_max in spans:
+            _draw_rectangle(pen, (x - thickness // 2, span_min, x + thickness // 2, span_max))
+
     for codepoint in range(0x2500, 0x2580):
-        recording, pen = DecomposingRecordingPen(glyph_set), TTGlyphPen(None)
-        glyph_set[source_cmap[codepoint]].draw(recording)
-        recording.replay(TransformPen(pen, transform))
-        _set_mapped_glyph(font, cmap, codepoint, pen.glyph(), "box")
-        origins[codepoint] = "cyroit"
+        name = unicodedata.name(chr(codepoint), "")
+        name_tokens = set(name.split())
+        pen = TTGlyphPen(None)
+        diagonal = "DIAGONAL" in name
+        cross = "CROSS" in name
+        dash_count = 0
+        if "DASH" in name_tokens:
+            dash_count = next(
+                (count for token, count in (("QUADRUPLE", 4), ("TRIPLE", 3), ("DOUBLE", 2)) if token in name_tokens),
+                1,
+            )
+        double_line = "DOUBLE" in name_tokens and dash_count == 0
+        heavy = "HEAVY" in name and "LIGHT" not in name
+        thickness = heavy_thickness if heavy else light_thickness
+        if diagonal:
+            diagonals: tuple[tuple[int, int, int, int], ...] = ((0, bottom, HALF_WIDTH, top),)
+            if "UPPER LEFT TO LOWER RIGHT" in name:
+                diagonals = ((0, top, HALF_WIDTH, bottom),)
+            if cross:
+                diagonals = ((0, bottom, HALF_WIDTH, top), (0, top, HALF_WIDTH, bottom))
+            for x0, y0, x1, y1 in diagonals:
+                _draw_polygon(pen, line_polygon((x0, y0), (x1, y1), thickness))
+            if double_line:
+                _draw_polygon(pen, line_polygon((8, top), (HALF_WIDTH - 8, bottom), max(thickness // 2, 20)))
+        else:
+            directions = set()
+            for token, direction in (("LEFT", "left"), ("RIGHT", "right"), ("UP", "up"), ("DOWN", "down")):
+                if token in name_tokens:
+                    directions.add(direction)
+            if "HORIZONTAL" in name:
+                directions.update(("left", "right"))
+            if "VERTICAL" in name:
+                directions.update(("up", "down"))
+            if cross:
+                directions.update(("left", "right", "up", "down"))
+            if not directions:
+                directions.update(("left", "right"))
+
+            def arm_thickness(direction: str, box_name: str = name, base_thickness: int = thickness) -> int:
+                token = direction.upper()
+                if f"HEAVY {token}" in box_name:
+                    return heavy_thickness
+                if f"LIGHT {token}" in box_name:
+                    return light_thickness
+                return base_thickness
+
+            if dash_count and directions == {"left", "right"}:
+                draw_horizontal(pen, 0, HALF_WIDTH, center_y, arm_thickness("left"), dash_count)
+            elif dash_count and directions == {"up", "down"}:
+                draw_vertical(pen, bottom, top, center_x, arm_thickness("up"), dash_count)
+            else:
+                horizontal_rails = (
+                    (center_y - double_rail_offset, center_y + double_rail_offset) if double_line else (center_y,)
+                )
+                vertical_rails = (
+                    (center_x - double_rail_offset, center_x + double_rail_offset) if double_line else (center_x,)
+                )
+                for y in horizontal_rails:
+                    if "left" in directions:
+                        draw_horizontal(
+                            pen,
+                            0,
+                            center_x,
+                            y,
+                            double_rail_thickness if double_line else arm_thickness("left"),
+                            dash_count,
+                        )
+                    if "right" in directions:
+                        draw_horizontal(
+                            pen,
+                            center_x,
+                            HALF_WIDTH,
+                            y,
+                            double_rail_thickness if double_line else arm_thickness("right"),
+                            dash_count,
+                        )
+                for x in vertical_rails:
+                    if "down" in directions:
+                        draw_vertical(
+                            pen,
+                            bottom,
+                            center_y,
+                            x,
+                            double_rail_thickness if double_line else arm_thickness("down"),
+                            dash_count,
+                        )
+                    if "up" in directions:
+                        draw_vertical(
+                            pen,
+                            center_y,
+                            top,
+                            x,
+                            double_rail_thickness if double_line else arm_thickness("up"),
+                            dash_count,
+                        )
+        glyph = pen.glyph()
+        _set_mapped_glyph(font, cmap, codepoint, glyph, "box")
+        origins[codepoint] = "generated"
+
+
+def _make_arrow_glyph(codepoint: int, bold: bool) -> Any:
+    """Generate a deterministic single-stroke arrow for one terminal cell."""
+    thickness, head = (72, 150) if bold else (56, 132)
+    center = (ASCENT - DESCENT) // 2
+    if codepoint in (0x2190, 0x2192):
+        left = codepoint == 0x2190
+        tip, base = (44, head) if left else (HALF_WIDTH - 44, HALF_WIDTH - head)
+        polygon = (
+            (tip, center),
+            (base, center + head // 2),
+            (base, center + thickness // 2),
+            (HALF_WIDTH - 44 if left else 44, center + thickness // 2),
+            (HALF_WIDTH - 44 if left else 44, center - thickness // 2),
+            (base, center - thickness // 2),
+        )
+        return _make_polygon_glyph(polygon)
+    up = codepoint == 0x2191
+    tip, base = (ASCENT - 44, ASCENT - head) if up else (-DESCENT + 44, -DESCENT + head)
+    y0, y1 = sorted((base, center))
+    return _make_polygon_glyph(
+        (
+            (HALF_WIDTH // 2, tip),
+            (HALF_WIDTH // 2 + head // 2, base),
+            (HALF_WIDTH // 2 + thickness // 2, base),
+            (HALF_WIDTH // 2 + thickness // 2, y1),
+            (HALF_WIDTH // 2 - thickness // 2, y1),
+            (HALF_WIDTH // 2 - thickness // 2, y0),
+            (HALF_WIDTH // 2 - head // 2, base),
+        )
+    )
+
+
+def _draw_thick_segment(
+    pen: TTGlyphPen,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    thickness: int,
+) -> None:
+    """Draw one deterministic thick line segment from independent geometry."""
+    x0, y0 = start
+    x1, y1 = end
+    dx, dy = x1 - x0, y1 - y0
+    length = max(math.hypot(dx, dy), 1.0)
+    half = thickness / 2
+    nx, ny = round(-dy * half / length), round(dx * half / length)
+    _draw_polygon(
+        pen,
+        (
+            (x0 + nx, y0 + ny),
+            (x1 + nx, y1 + ny),
+            (x1 - nx, y1 - ny),
+            (x0 - nx, y0 - ny),
+        ),
+    )
+
+
+def _make_double_arrow_glyph(bold: bool) -> Any:
+    """Generate a distinct double horizontal arrow with rails and chevrons."""
+    center = (ASCENT - DESCENT) // 2
+    rail_thickness, chevron_thickness = (56, 56) if bold else (44, 44)
+    rail_offset = 48 if bold else 42
+    pen = TTGlyphPen(None)
+    for y in (center - rail_offset, center + rail_offset):
+        _draw_rectangle(pen, (132, y - rail_thickness // 2, 452, y + rail_thickness // 2))
+    _draw_thick_segment(pen, (48, center), (166, center + 108), chevron_thickness)
+    _draw_thick_segment(pen, (48, center), (166, center - 108), chevron_thickness)
+    _draw_thick_segment(pen, (104, center), (210, center + 78), max(28, chevron_thickness // 2))
+    _draw_thick_segment(pen, (104, center), (210, center - 78), max(28, chevron_thickness // 2))
+    return pen.glyph()
+
+
+def _make_return_arrow_glyph(bold: bool) -> Any:
+    """Generate the shared return-mark outline for U+21B5 and U+23CE."""
+    thickness, head = (72, 132) if bold else (56, 112)
+    center = (ASCENT - DESCENT) // 2
+    hook_top = round(ASCENT * 0.76)
+    pen = TTGlyphPen(None)
+    _draw_rectangle(pen, (120, center - thickness // 2, 420, center + thickness // 2))
+    _draw_rectangle(pen, (420 - thickness // 2, center, 420 + thickness // 2, hook_top))
+    _draw_polygon(
+        pen,
+        (
+            (48, center),
+            (48 + head, center + head // 2),
+            (48 + head, center + thickness // 2),
+            (120, center + thickness // 2),
+            (120, center - thickness // 2),
+            (48 + head, center - thickness // 2),
+        ),
+    )
+    return pen.glyph()
+
+
+def install_terminal_semantics(
+    font: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+    bold: bool,
+) -> None:
+    """Install locally specified arrows and return/check semantics."""
+    for codepoint in sorted(BASIC_ARROWS):
+        _set_mapped_glyph(font, cmap, codepoint, _make_arrow_glyph(codepoint, bold), "arrow")
+        origins[codepoint] = "generated"
+    left = _make_double_arrow_glyph(bold)
+    right = _transform_glyph(left, (-1, 0, 0, 1, HALF_WIDTH, 0))
+    for codepoint, glyph in ((0x21D0, left), (0x21D2, right)):
+        _set_mapped_glyph(font, cmap, codepoint, glyph, "arrow")
+        origins[codepoint] = "generated"
+    return_glyph = _make_return_arrow_glyph(bold)
+    _set_mapped_glyph(font, cmap, RETURN_ARROW_CODEPOINT, return_glyph, "return")
+    cmap[RETURN_SYMBOL_CODEPOINT] = cmap[RETURN_ARROW_CODEPOINT]
+    origins[RETURN_ARROW_CODEPOINT] = origins[RETURN_SYMBOL_CODEPOINT] = "generated"
 
 
 def _rectangles_glyph(rectangles: Iterable[tuple[int, int, int, int]]) -> Any:
@@ -572,41 +897,6 @@ def _fit_enclosed_digits(font: TTFont, enclosed_source: TTFont, cmap: Mapping[in
         source_glyphs[source_name].draw(recording)
         recording.replay(TransformPen(pen, (x_scale, 0, 0, y_scale, x_offset, 0)))
         _replace_glyph(font, glyph_name, pen.glyph())
-
-
-def _normalize_mirrored_horizontal_arrows(font: TTFont, cmap: Mapping[int, str]) -> None:
-    """Shorten each left arrow's shaft and derive an exact right-facing mirror."""
-    glyph_set = font.getGlyphSet()
-    for left_codepoint, right_codepoint in MIRRORED_HORIZONTAL_ARROW_PAIRS:
-        source_name = cmap[left_codepoint]
-        bounds_pen = BoundsPen(glyph_set)
-        glyph_set[source_name].draw(bounds_pen)
-        if bounds_pen.bounds is None:
-            raise ValueError(f"Cannot normalize empty U+{left_codepoint:04X} arrow")
-        x_min, y_min, x_max, y_max = bounds_pen.bounds
-        natural_width = x_max - x_min
-        head_depth = (y_max - y_min) * ARROW_HEAD_DEPTH_RATIO
-        if natural_width <= HORIZONTAL_ARROW_INK_WIDTH or head_depth >= HORIZONTAL_ARROW_INK_WIDTH:
-            raise ValueError(f"Cannot shorten U+{left_codepoint:04X} horizontal arrow")
-        target_left = (HALF_WIDTH - HORIZONTAL_ARROW_INK_WIDTH) / 2
-        shaft_factor = (HORIZONTAL_ARROW_INK_WIDTH - head_depth) / (natural_width - head_depth)
-
-        fit_left = partial(
-            _shorten_left_arrow_point,
-            x_min=x_min,
-            head_depth=head_depth,
-            shaft_factor=shaft_factor,
-            target_left=target_left,
-        )
-        fit_right = partial(_mirror_transformed_point, transform_point=fit_left)
-
-        recording = DecomposingRecordingPen(glyph_set)
-        glyph_set[source_name].draw(recording)
-        left_pen, right_pen = TTGlyphPen(None), TTGlyphPen(None)
-        _replay_transformed(recording, left_pen, fit_left)
-        _replay_transformed(recording, right_pen, fit_right)
-        _replace_glyph(font, cmap[left_codepoint], left_pen.glyph())
-        _replace_glyph(font, cmap[right_codepoint], right_pen.glyph())
 
 
 def _fit_proportional_cell_symbols(font: TTFont, cmap: Mapping[int, str], codepoints: frozenset[int]) -> None:
@@ -719,7 +1009,6 @@ def normalize_terminal_glyphs(
     origins: MutableMapping[int, str],
 ) -> None:
     """Stabilize audited symbols and exact terminal block graphics."""
-    _normalize_mirrored_horizontal_arrows(font, cmap)
     _fit_enclosed_digits(font, enclosed_source, cmap)
     for codepoint in ENCLOSED_DIGITS:
         origins[codepoint] = "ibm"
@@ -737,60 +1026,23 @@ class GlyphCopier:
         self.cmap, self.glyphs = source.getBestCmap(), source.getGlyphSet()
         self.metrics, self.source_upm = source["hmtx"].metrics, source["head"].unitsPerEm
         self.order, self.counter = target.getGlyphOrder(), 0
-        self.cache: dict[tuple[str, int, bool | None], str] = {}
+        self.cache: dict[tuple[str, int], str] = {}
 
     def copy_codepoint(self, codepoint: int) -> str:
         """Copy the glyph mapped from a Unicode codepoint."""
-        return self.copy_glyph(
-            self.cmap[codepoint],
-            cell_width(codepoint),
-            arrow_points_left=HORIZONTAL_ARROWS.get(codepoint),
-        )
+        return self.copy_glyph(self.cmap[codepoint], cell_width(codepoint))
 
-    def copy_glyph(self, source_name: str, width: int, arrow_points_left: bool | None = None) -> str:
+    def copy_glyph(self, source_name: str, width: int) -> str:
         """Copy one source glyph, centered and scaled in the requested cell."""
-        key = source_name, width, arrow_points_left
+        key = source_name, width
         if cached := self.cache.get(key):
             return cached
         factor = UPM / self.source_upm * self.scale
         recording, pen = DecomposingRecordingPen(self.glyphs), TTGlyphPen(None)
         self.glyphs[source_name].draw(recording)
-        if arrow_points_left is None:
-            source_advance = self.metrics[source_name][0]
-            if self.prefix == SOURCE_PREFIXES["cyroit"]:
-                source_advance = next(
-                    (
-                        legacy
-                        for cp, legacy in CYROIT_LEGACY_CENTERING_ADVANCE.items()
-                        if self.cmap.get(cp) == source_name
-                    ),
-                    source_advance,
-                )
-            offset = 0.0 if width == 0 else (width - source_advance * factor) / 2
-            recording.replay(TransformPen(pen, (factor, 0, 0, factor, offset, 0)))
-        else:
-            bounds_pen = BoundsPen(self.glyphs)
-            self.glyphs[source_name].draw(bounds_pen)
-            if bounds_pen.bounds is None:
-                raise ValueError(f"Cannot fit empty glyph {source_name}")
-            x_min, y_min, x_max, y_max = bounds_pen.bounds
-            natural_width = (x_max - x_min) * factor
-            head_depth = (y_max - y_min) * factor * ARROW_HEAD_DEPTH_RATIO
-            if natural_width <= HORIZONTAL_ARROW_INK_WIDTH or head_depth >= HORIZONTAL_ARROW_INK_WIDTH:
-                raise ValueError(f"Cannot shorten horizontal arrow {source_name}")
-            target_left = (width - HORIZONTAL_ARROW_INK_WIDTH) / 2
-            target_right = target_left + HORIZONTAL_ARROW_INK_WIDTH
-            shaft_factor = (HORIZONTAL_ARROW_INK_WIDTH - head_depth) / (natural_width - head_depth)
-
-            def transform_point(point: tuple[float, float]) -> tuple[float, float]:
-                x, y = point
-                distance = (x - x_min) * factor if arrow_points_left else (x_max - x) * factor
-                if distance > head_depth:
-                    distance = head_depth + (distance - head_depth) * shaft_factor
-                target_x = target_left + distance if arrow_points_left else target_right - distance
-                return target_x, y * factor
-
-            _replay_transformed(recording, pen, transform_point)
+        source_advance = self.metrics[source_name][0]
+        offset = 0.0 if width == 0 else (width - source_advance * factor) / 2
+        recording.replay(TransformPen(pen, (factor, 0, 0, factor, offset, 0)))
         glyph, name = pen.glyph(), f"sg.{self.prefix}.{self.counter:05d}"
         self.counter += 1
         self.target["glyf"].glyphs[name] = glyph
@@ -812,13 +1064,18 @@ def add_codepoints(
     """Append eligible, previously unmapped source glyphs."""
     copier = GlyphCopier(target, source, SOURCE_PREFIXES[origin], SOURCE_SCALES[origin])
     for codepoint in sorted(source.getBestCmap()):
-        if codepoint not in cmap and not is_private_use(codepoint) and accepts(codepoint):
+        if (
+            codepoint not in cmap
+            and codepoint not in ORPHAN_CODEPOINTS
+            and not is_private_use(codepoint)
+            and accepts(codepoint)
+        ):
             cmap[codepoint], origins[codepoint] = copier.copy_codepoint(codepoint), origin
     return copier
 
 
-def remap_uvs(source: TTFont, copier: GlyphCopier, origins: Mapping[int, str]) -> UVSMap:
-    """Copy Cyroit variation sequences whose base glyphs won source precedence."""
+def remap_biz_uvs(source: TTFont, copier: GlyphCopier) -> UVSMap:
+    """Copy every approved BIZ variation sequence into the target."""
     remapped: UVSMap = {}
     for table in source["cmap"].tables:
         if table.format != 14:
@@ -827,7 +1084,7 @@ def remap_uvs(source: TTFont, copier: GlyphCopier, origins: Mapping[int, str]) -
             selected = [
                 (base, None if name is None else copier.copy_glyph(name, cell_width(base)))
                 for base, name in entries
-                if origins.get(base) == "cyroit"
+                if base not in ORPHAN_CODEPOINTS
             ]
             if selected:
                 remapped[selector] = selected
@@ -896,7 +1153,7 @@ def set_names(font: TTFont, style: str) -> None:
     subfamily = "Bold Italic" if style == "BoldItalic" else style
     postscript = f"{PS_FAMILY}-{style}"
     values = {
-        0: "Contains Ubuntu Mono, Circle M+ 1m, BIZ UDGothic, and IBM Plex Sans JP.",
+        0: "Contains Ubuntu Mono, M PLUS 1p, BIZ UDGothic, NINJAL Hentaigana, and IBM Plex Sans JP.",
         1: FAMILY,
         2: subfamily,
         3: f"{VERSION};SGST;{postscript}",
@@ -1002,28 +1259,30 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         target = fonts["ubuntu"]
         if target["head"].unitsPerEm != UPM:
             scale_upem(target, UPM)
-        scale_ubuntu_ascii(target)
-        mapping = {cp: name for cp, name in target.getBestCmap().items() if not is_private_use(cp)}
+        scale_ascii(target)
+        mapping = {
+            cp: name
+            for cp, name in target.getBestCmap().items()
+            if not is_private_use(cp) and cp not in ORPHAN_CODEPOINTS
+        }
         origins = dict.fromkeys(mapping, "ubuntu")
-        copier = add_codepoints(target, fonts["cyroit"], mapping, origins, "cyroit", is_adjusted_japanese)
-        # Fish hard-codes U+23CE for output without a trailing newline. Reuse
-        # Cyroit's U+21B5 outline so fish and Neovim show the same return mark.
-        mapping[RETURN_SYMBOL_CODEPOINT] = mapping[RETURN_ARROW_CODEPOINT]
-        origins[RETURN_SYMBOL_CODEPOINT] = "cyroit"
-        uvs = remap_uvs(fonts["cyroit"], copier, origins)
+        add_codepoints(target, fonts["mplus1p"], mapping, origins, "mplus1p", is_mplus1p_japanese)
+        add_codepoints(target, fonts["ninjal"], mapping, origins, "ninjal", is_ninjal_hentaigana)
+        biz_copier = add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
+        uvs = remap_biz_uvs(fonts["biz"], biz_copier)
+        add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
         _make_neovim_glyphs(
             target,
-            fonts["cyroit"],
             scratch_font,
             mapping,
             origins,
             "Italic" in style,
             "Bold" in style,
         )
-        add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
-        add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
-        replace_box_drawing(target, fonts["cyroit"], mapping, origins)
+        install_terminal_semantics(target, mapping, origins, "Bold" in style)
+        replace_box_drawing(target, mapping, origins, "Bold" in style)
         normalize_terminal_glyphs(target, fonts["ibm"], mapping, origins)
+        remove_orphans(mapping, origins)
         target.setGlyphOrder(target.getGlyphOrder())
         target["maxp"].numGlyphs = len(target.getGlyphOrder())
         rebuild_cmap(target, mapping, uvs)
@@ -1041,12 +1300,16 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         glyph_count, counts = len(target.getGlyphOrder()), Counter(origins.values())
 
     uvs_count = sum(map(len, uvs.values()))
+    if set(origins) != set(mapping):
+        raise RuntimeError("Per-codepoint ownership does not match the final cmap")
     summary: dict[str, object] = {
         "style": style,
         "output": str(output.relative_to(ROOT)),
         "codepoints": {origin: counts[origin] for origin in PROVENANCE_ORIGINS},
         "total_codepoints": len(mapping),
-        "uvs_mappings_from_cyroit": uvs_count,
+        "orphan_count": len(ORPHAN_CODEPOINTS),
+        "orphan_codepoints_absent": sorted(f"U+{cp:04X}" for cp in ORPHAN_CODEPOINTS if cp not in mapping),
+        "uvs_mappings_from_biz": uvs_count,
         "glyphs": glyph_count,
         "size_bytes": output.stat().st_size,
         "scales": SOURCE_SCALES,
@@ -1054,6 +1317,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
             f"U+{cp:04X}": origins.get(cp)
             for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
         },
+        "ownership": {f"U+{cp:04X}": origins[cp] for cp in sorted(mapping)},
         "neovim_origins": {f"U+{cp:04X}": origins[cp] for cp in (*NEOVIM_GLYPHS, NEOVIM_CHECK)},
     }
     print(f"wrote    {output.name}: {len(mapping):,} codepoints, IBM fallback {counts['ibm']:,}, UVS {uvs_count:,}")
@@ -1083,7 +1347,9 @@ def main() -> None:
     document = {
         "family": FAMILY,
         "version": VERSION,
+        "mplus1p_commit": MPLUS1P_COMMIT,
         "ibm_commit": IBM_COMMIT,
+        "inner_hashes": {"ninjal_hentaigana.ttf": NINJAL_TTF_SHA256},
         "assets": [asdict(asset) for asset in ASSETS],
         "styles": summaries,
     }

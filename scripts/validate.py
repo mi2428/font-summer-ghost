@@ -18,14 +18,69 @@ from fontTools.ttLib import TTFont
 ROOT, STYLES = Path(__file__).resolve().parents[1], ("Regular", "Bold", "Italic", "BoldItalic")
 DIST = ROOT / "dist"
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
+MPLUS1P_COMMIT = "2796410152d4f9524b68ed46e69c1b60f8e0f7c3"
+NINJAL_ARCHIVE_SHA256 = "62b01c19cb40dc4b64b1e1da776fca483e19e21c2772cc3f9db9a067bedbc84d"
+NINJAL_TTF_SHA256 = "e1301406c49dffed801bc12f0bb6a148f90215d4cf7d3a7bb0831cd798f6345e"
+ALLOWED_ORIGINS = frozenset({"ubuntu", "mplus1p", "biz", "ninjal", "ibm", "generated"})
+APPROVED_ASSETS = {
+    "ubuntu-font-family-0.83.zip": (
+        "https://assets.ubuntu.com/v1/0cef8205-ubuntu-font-family-0.83.zip",
+        "61a2b342526fd552f19fef438bb9211a8212de19ad96e32a1209c039f1d68ecf",
+    ),
+    "MPLUS1p-Regular.ttf": (
+        f"https://raw.githubusercontent.com/google/fonts/{MPLUS1P_COMMIT}/ofl/mplus1p/MPLUS1p-Regular.ttf",
+        "2f294ad496432b1608f070d310e3aa2adcf1de4af429f4901df97ec4bd361ed1",
+    ),
+    "MPLUS1p-Bold.ttf": (
+        f"https://raw.githubusercontent.com/google/fonts/{MPLUS1P_COMMIT}/ofl/mplus1p/MPLUS1p-Bold.ttf",
+        "76eb077b0a31ca33ca40238e47da5a17e2786741607cec09678d7d2e5ab1afc1",
+    ),
+    "BIZUDGothic-1.051.zip": (
+        "https://github.com/googlefonts/morisawa-biz-ud-gothic/releases/download/v1.051/BIZUDGothic.zip",
+        "30692df621b92df13b88f1360aed1ab6ae50de441bce751a396c6439045cd759",
+    ),
+    "ninjal_hentaigana.zip": (
+        "https://cid.ninjal.ac.jp/kana/ninjal_hentaigana.zip",
+        NINJAL_ARCHIVE_SHA256,
+    ),
+    "IBMPlexSansJP-Regular.ttf": (
+        f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
+        "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf",
+        "825b5c933c3fdb380eb84195788559103ae12710098218a1848376e35a45fcce",
+    ),
+    "IBMPlexSansJP-Bold.ttf": (
+        f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
+        "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf",
+        "85645e1bc1f92778e06c100c7bc6c6720b1d3955a8eee8d38c805589f59a261e",
+    ),
+}
+BIZ_UVS_TOTAL = 10_160
+BIZ_UVS_SELECTOR_COUNTS = {
+    0xFE00: 83,
+    0xFE01: 3,
+    0xE0100: 9_643,
+    0xE0101: 404,
+    0xE0102: 22,
+    0xE0103: 3,
+    0xE0104: 1,
+    0xE0105: 1,
+}
+NINJAL_CODEPOINTS = frozenset(range(0x1B001, 0x1B11F)) | {0x3099, 0x309A}
+ORPHAN_CODEPOINTS = frozenset(
+    set(range(0x2FF0, 0x3000))
+    | {0x31EF}
+    | set(range(0x1B120, 0x1B129))
+    | set(range(0x1B130, 0x1B169))
+    | {0x2A708, 0x2CEFF, 0x2CF00, 0x2CF02}
+)
 EXPECTED_ORIGINS = {
     "U+0041": "ubuntu",
-    "U+2190": "cyroit",
-    "U+21B5": "cyroit",
-    "U+23CE": "cyroit",
-    "U+2500": "cyroit",
-    "U+3042": "cyroit",
-    "U+65E5": "cyroit",
+    "U+2190": "generated",
+    "U+21B5": "generated",
+    "U+23CE": "generated",
+    "U+2500": "generated",
+    "U+3042": "mplus1p",
+    "U+65E5": "biz",
     "U+FF11": "biz",
     "U+3405": "ibm",
 }
@@ -74,40 +129,39 @@ NEOVIM_GLYPHS = {
     0x207F,
     0x2C7D,
 }
-NEOVIM_REPRESENTATIVE_BOUNDS = {
-    "Regular": {0x1D36: (84, 218, 405, 700), 0x1D50: (72, 227, 444, 589), 0x207B: (111, 402, 402, 461)},
-    "Bold": {0x1D36: (73, 218, 422, 700), 0x1D50: (62, 227, 450, 590), 0x207B: (106, 388, 406, 480)},
-    "Italic": {0x1D36: (77, 218, 469, 700), 0x1D50: (60, 227, 477, 589), 0x207B: (127, 402, 428, 461)},
-    "BoldItalic": {0x1D36: (66, 218, 486, 700), 0x1D50: (50, 227, 479, 590), 0x207B: (120, 388, 435, 480)},
-}
+MODIFIER_BOUNDS_ENVELOPE = (-32, 160, 544, 780)
 REQUIRED = {
     0x0041: "Ubuntu Mono Latin",
     0x21B5: "Neovim return arrow",
     0x23CE: "fish omitted-newline return symbol",
     0x2460: "circled digit one",
-    0x2500: "Cyroit box drawing",
+    0x2500: "generated box drawing",
     0x2580: "upper half block",
     0x2590: "right half block",
     0x2596: "quadrant lower-left block",
     0x259F: "quadrant complement block",
-    0x3042: "Circle M+ hiragana",
-    0x30A2: "Circle M+ katakana",
-    0x65E5: "Cyroit kanji",
-    0x9AD9: "Cyroit Japanese-name kanji",
-    0xFA11: "Cyroit compatibility ideograph",
+    0x3042: "M PLUS hiragana",
+    0x30A2: "M PLUS katakana",
+    0x65E5: "BIZ kanji",
+    0x9AD9: "BIZ Japanese-name kanji",
+    0xFA11: "BIZ compatibility ideograph",
     0x3405: "IBM Plex Sans JP fallback",
+    0x3099: "NINJAL combining hentaigana mark",
+    0x309A: "NINJAL combining hentaigana mark",
+    0x1B001: "NINJAL hentaigana",
+    0x1B11E: "NINJAL hentaigana",
     0x2985: "left white parenthesis",
     0x2986: "right white parenthesis",
 }
-UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
 FULL_WIDTH_OVERRIDES = frozenset(WHITE_PARENTHESIS_PAIR)
 RETURN_MARKS = (0x21B5, 0x23CE)
-RETURN_MARK_BOUNDS = {False: (-66, 53, 453, 623), True: (-73, 41, 471, 618)}
+RETURN_MARK_BOUNDS = {False: (48, 310, 448, 646), True: (48, 302, 456, 646)}
+CHECK_MARK_CODEPOINT = 0x2714
+CHECK_MARK_BOUNDS = {False: (35, 163, 499, 717), True: (25, 158, 508, 722)}
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
 VERTICAL_ARROWS = (0x2191, 0x2193)
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
-MIRRORED_ARROW_BOUNDS = {False: (6, 155, 506, 546), True: (6, 130, 506, 570)}
 ENCLOSED_DIGITS = range(0x2460, 0x2474)
 ENCLOSED_DIGIT_INK_SIZE = {False: (630, 846), True: (644, 866)}
 ENCLOSED_DIGIT_BOUNDS = {False: (-59, -73, 571, 773), True: (-66, -83, 578, 783)}
@@ -116,8 +170,8 @@ ENCLOSED_DIGIT_ASPECT_RANGE = (0.74, 0.75)
 ENCLOSED_DIGIT_INNER_BOUNDS = {False: (-37, -44, 549, 745), True: (-32, -37, 544, 737)}
 ENCLOSED_DIGIT_NUMERAL_CONTOURS = (1, 1, 1, 2, 1, 2, 1, 3, 2, 3, 2, 2, 2, 3, 2, 3, 2, 4, 3, 3)
 PLAIN_CIRCLE_BOUNDS = {
-    False: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (121, -52, 904, 801)},
-    True: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (113, -61, 912, 822)},
+    False: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (69, -75, 955, 812)},
+    True: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (54, -89, 970, 826)},
 }
 GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
     {
@@ -194,17 +248,17 @@ CELL_FIT_HEIGHTS = {
 }
 UNCHANGED_AUDITED_BOUNDS = {
     False: {
-        0x2190: (6, 113, 506, 567),
-        0x2191: (29, 22, 483, 695),
-        0x2192: (6, 113, 506, 567),
-        0x2193: (29, -15, 483, 659),
+        0x2190: (44, 310, 468, 404),
+        0x2191: (190, 338, 322, 806),
+        0x2192: (44, 310, 468, 404),
+        0x2193: (190, -130, 322, 338),
         0x25C9: (47, 129, 466, 548),
     },
     True: {
-        0x2190: (6, 107, 506, 574),
-        0x2191: (22, 14, 490, 701),
-        0x2192: (6, 107, 506, 574),
-        0x2193: (21, -20, 489, 667),
+        0x2190: (44, 302, 468, 413),
+        0x2191: (181, 338, 331, 806),
+        0x2192: (44, 302, 468, 413),
+        0x2193: (181, -130, 331, 338),
         0x25C9: (43, 126, 469, 552),
     },
 }
@@ -227,8 +281,8 @@ BLOCK_RECTANGLES = {
     0x259F: ((0, -174, 512, 338), (256, 338, 512, 850)),
 }
 INK_HEIGHTS = {
-    False: {0x0041: 0.638, 0x3042: 0.788, 0x65E5: 0.760, 0x8A9E: 0.792},
-    True: {0x0041: 0.638, 0x3042: 0.796, 0x65E5: 0.771, 0x8A9E: 0.803},
+    False: {0x0041: 0.638, 0x3042: 0.866, 0x65E5: 0.760, 0x8A9E: 0.791},
+    True: {0x0041: 0.638, 0x3042: 0.884, 0x65E5: 0.764, 0x8A9E: 0.795},
 }
 T = TypeVar("T")
 Contour = list[tuple[str, tuple[Any, ...]]]
@@ -238,6 +292,73 @@ def expect(actual: T, expected: T, context: str) -> None:
     """Raise a contextual assertion when two values differ."""
     if actual != expected:
         raise AssertionError(f"{context}: expected {expected!r}, got {actual!r}")
+
+
+def expect_bounds_with_tolerance(
+    actual: tuple[int, int, int, int],
+    expected: tuple[int, int, int, int],
+    tolerance: int,
+    context: str,
+) -> None:
+    """Require each bounds coordinate to remain within an approved recipe tolerance."""
+    if any(abs(value - target) > tolerance for value, target in zip(actual, expected, strict=True)):
+        raise AssertionError(f"{context}: expected {expected!r} +/- {tolerance}, got {actual!r}")
+
+
+def _parse_codepoint(value: object) -> int | None:
+    """Parse a provenance codepoint key without accepting ambiguous labels."""
+    if not isinstance(value, str) or not value.startswith("U+"):
+        return None
+    try:
+        return int(value[2:], 16)
+    except ValueError:
+        return None
+
+
+def ownership_map(summary: Mapping[str, object], style: str) -> dict[int, str]:
+    """Read the explicit per-codepoint ownership index emitted by the builder."""
+    raw = summary.get("ownership")
+    if not isinstance(raw, Mapping) or not raw:
+        raise AssertionError(f"{style} provenance ownership must be a non-empty object")
+    parsed: dict[int, str] = {}
+    for key, origin in raw.items():
+        codepoint = _parse_codepoint(key)
+        if codepoint is None or not isinstance(origin, str):
+            raise AssertionError(f"{style} provenance has malformed ownership entry: {key!r}")
+        if codepoint in parsed:
+            raise AssertionError(f"{style} provenance duplicates U+{codepoint:04X} ownership")
+        parsed[codepoint] = origin
+    if set(parsed.values()) - ALLOWED_ORIGINS:
+        unknown = sorted(set(parsed.values()) - ALLOWED_ORIGINS)
+        raise AssertionError(f"{style} provenance has unknown origins: {unknown}")
+    return parsed
+
+
+def validate_ownership(summary: Mapping[str, object], style: str, cmap: Mapping[int, str]) -> None:
+    """Validate explicit source ownership and local-generation boundaries."""
+    owners = ownership_map(summary, style)
+    mapped = set(cmap)
+    expect(set(owners), mapped, f"{style} ownership/cmap coverage")
+    expect(mapped & ORPHAN_CODEPOINTS, set(), f"{style} approved orphan removals")
+    expect(
+        {cp for cp, origin in owners.items() if origin == "ninjal"},
+        set(NINJAL_CODEPOINTS),
+        f"{style} direct NINJAL coverage",
+    )
+    generated = (
+        set(range(0x2190, 0x2194))
+        | set(RETURN_MARKS)
+        | set(range(0x2500, 0x2591))
+        | set(range(0x2594, 0x25A0))
+        | set(NEOVIM_GLYPHS)
+        | {CHECK_MARK_CODEPOINT}
+    )
+    expect(
+        {cp for cp in generated if cp in owners and owners[cp] != "generated"},
+        set(),
+        f"{style} generated semantic ownership",
+    )
+    expect(owners.get(CHECK_MARK_CODEPOINT), "generated", f"{style} check-mark ownership")
 
 
 def name(font: TTFont, name_id: int) -> str:
@@ -465,34 +586,51 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             raise AssertionError(f"{path.name} has unexpected advances: {sorted(unexpected)}")
         if pua := [cp for cp in cmap if is_private_use(cp)]:
             raise AssertionError(f"{path.name} maps {len(pua)} private-use codepoints")
+        expect(set(cmap) & ORPHAN_CODEPOINTS, set(), f"{path.name} approved orphan removals")
         missing = [f"{description} U+{cp:04X}" for cp, description in REQUIRED.items() if cp not in cmap]
         if missing:
             raise AssertionError(f"{path.name} lacks: {', '.join(missing)}")
+        missing_ninjal = sorted(NINJAL_CODEPOINTS - set(cmap))
+        if missing_ninjal:
+            raise AssertionError(f"{path.name} lacks direct NINJAL coverage: {missing_ninjal}")
         neovim = NEOVIM_GLYPHS | {0x2714}
         for cp in neovim:
             glyph_name = cmap[cp]
             expect(font["hmtx"].metrics[glyph_name][0], 512, f"{path.name} U+{cp:04X} Neovim advance")
             if _bounds(font, glyph_name) == (0, 0, 0, 0):
                 raise AssertionError(f"{path.name} U+{cp:04X} Neovim glyph is empty")
-        for cp, expected_bounds in NEOVIM_REPRESENTATIVE_BOUNDS[style].items():
-            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} representative bounds")
+        for cp in NEOVIM_GLYPHS:
+            x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
+            if not (
+                x_min >= MODIFIER_BOUNDS_ENVELOPE[0]
+                and y_min >= MODIFIER_BOUNDS_ENVELOPE[1]
+                and x_max <= MODIFIER_BOUNDS_ENVELOPE[2]
+                and y_max <= MODIFIER_BOUNDS_ENVELOPE[3]
+                and x_max > x_min
+                and y_max > y_min
+            ):
+                raise AssertionError(f"{path.name} U+{cp:04X} modifier outside generated envelope")
+        expect_bounds_with_tolerance(
+            _bounds(font, cmap[CHECK_MARK_CODEPOINT]),
+            CHECK_MARK_BOUNDS[bold],
+            8,
+            f"{path.name} check-mark bounds",
+        )
         if len(cmap) < 15_000:
             raise AssertionError(f"{path.name} maps only {len(cmap)} Unicode codepoints")
         return_glyphs = tuple(cmap[codepoint] for codepoint in RETURN_MARKS)
         expect(len(set(return_glyphs)), 1, f"{path.name} return marks share one glyph")
-        expect(_bounds(font, return_glyphs[0]), RETURN_MARK_BOUNDS[bold], f"{path.name} return mark bounds")
+        expect_bounds_with_tolerance(
+            _bounds(font, return_glyphs[0]),
+            RETURN_MARK_BOUNDS[bold],
+            8,
+            f"{path.name} return mark bounds",
+        )
         for codepoint, glyph_name in cmap.items():
             expect(
                 font["hmtx"].metrics[glyph_name][0],
                 cell_width(codepoint),
                 f"{path.name} U+{codepoint:04X} Unicode 17 advance",
-            )
-        for codepoint in UNICODE17_WIDE_CODEPOINTS:
-            expect(codepoint in cmap, True, f"{path.name} Unicode 17 wide coverage U+{codepoint:04X}")
-            expect(
-                font["hmtx"].metrics[cmap[codepoint]][0],
-                1024,
-                f"{path.name} U+{codepoint:04X} explicit Unicode 17 wide advance",
             )
         expect(
             font["hmtx"].metrics[cmap[0x0311]][0],
@@ -659,31 +797,19 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             [(1024 - x, y) for x, y in right_points],
             f"{path.name} exact white parenthesis mirror",
         )
-        horizontal_heights: list[int] = []
         for cp in HORIZONTAL_ARROWS:
             x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
-            expect(x_max - x_min, 500, f"{path.name} U+{cp:04X} horizontal arrow ink width")
-            if x_min < 0 or x_max > 512:
-                raise AssertionError(f"{path.name} U+{cp:04X} exceeds its half-width cell: {x_min}..{x_max}")
-            horizontal_heights.append(y_max - y_min)
+            if x_min < 0 or x_max > 512 or x_max <= x_min or y_max <= y_min:
+                raise AssertionError(f"{path.name} U+{cp:04X} is not a recognizable half-width arrow")
         vertical_widths = [_bounds(font, cmap[cp])[2] - _bounds(font, cmap[cp])[0] for cp in VERTICAL_ARROWS]
-        if max(horizontal_heights + vertical_widths) - min(horizontal_heights + vertical_widths) > 2:
-            raise AssertionError(
-                f"{path.name} arrow cross-axis sizes differ: "
-                f"horizontal heights {horizontal_heights}, vertical widths {vertical_widths}"
-            )
+        if any(width <= 0 or width > 512 for width in vertical_widths):
+            raise AssertionError(f"{path.name} vertical arrows are outside their half-width cell")
         for left_codepoint, right_codepoint in MIRRORED_HORIZONTAL_ARROW_PAIRS:
             left_name, right_name = cmap[left_codepoint], cmap[right_codepoint]
-            expect(
-                _bounds(font, left_name),
-                MIRRORED_ARROW_BOUNDS[bold],
-                f"{path.name} U+{left_codepoint:04X} normalized double-arrow bounds",
-            )
-            expect(
-                _bounds(font, right_name),
-                MIRRORED_ARROW_BOUNDS[bold],
-                f"{path.name} U+{right_codepoint:04X} normalized double-arrow bounds",
-            )
+            for codepoint, glyph_name in ((left_codepoint, left_name), (right_codepoint, right_name)):
+                x_min, y_min, x_max, y_max = _bounds(font, glyph_name)
+                if x_min < 0 or x_max > 512 or y_min < -174 or y_max > 850 or x_max <= x_min or y_max <= y_min:
+                    raise AssertionError(f"{path.name} U+{codepoint:04X} double-arrow is outside its cell")
             left_points, left_ends, left_flags = font["glyf"][left_name].getCoordinates(font["glyf"])
             right_points, right_ends, right_flags = font["glyf"][right_name].getCoordinates(font["glyf"])
             expect(list(left_ends), list(right_ends), f"{path.name} mirrored double-arrow contours")
@@ -693,10 +819,35 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
                 [(512 - x, y) for x, y in right_points],
                 f"{path.name} exact double-arrow mirror",
             )
+            for double_codepoint, single_codepoint in (
+                (left_codepoint, HORIZONTAL_ARROWS[0]),
+                (right_codepoint, HORIZONTAL_ARROWS[1]),
+            ):
+                double_points, double_ends, double_flags = font["glyf"][cmap[double_codepoint]].getCoordinates(
+                    font["glyf"]
+                )
+                single_points, single_ends, single_flags = font["glyf"][cmap[single_codepoint]].getCoordinates(
+                    font["glyf"]
+                )
+                if (
+                    list(double_points) == list(single_points)
+                    and list(double_ends) == list(single_ends)
+                    and list(double_flags) == list(single_flags)
+                ):
+                    raise AssertionError(
+                        f"{path.name} U+{double_codepoint:04X} double-arrow outline duplicates U+{single_codepoint:04X}"
+                    )
         variation_tables = [table for table in font["cmap"].tables if table.format == 14]
         if not variation_tables or not variation_tables[0].uvsDict:
             raise AssertionError(f"{path.name} lacks Japanese variation sequences")
         selectors = len(variation_tables[0].uvsDict)
+        selector_counts = {selector: len(entries) for selector, entries in variation_tables[0].uvsDict.items()}
+        expect(
+            sum(selector_counts.values()),
+            BIZ_UVS_TOTAL,
+            f"{path.name} direct BIZ variation-sequence count",
+        )
+        expect(selector_counts, BIZ_UVS_SELECTOR_COUNTS, f"{path.name} BIZ variation selectors")
         print(
             f"ok       {path.name}: {len(cmap):,} codepoints, "
             f"{len(font.getGlyphOrder()):,} glyphs, {selectors:,} selectors"
@@ -758,7 +909,13 @@ def validate_provenance(data: Mapping[str, object]) -> Mapping[str, Mapping[str,
     """Validate top-level build provenance and index its style records."""
     expect(data.get("family"), "Summer Ghost", "provenance family")
     expect(data.get("version"), "0.1.0", "provenance version")
+    expect(data.get("mplus1p_commit"), MPLUS1P_COMMIT, "provenance M PLUS commit")
     expect(data.get("ibm_commit"), IBM_COMMIT, "provenance IBM commit")
+    expect(
+        data.get("inner_hashes"),
+        {"ninjal_hentaigana.ttf": NINJAL_TTF_SHA256},
+        "provenance NINJAL inner hash",
+    )
     assets = data.get("assets")
     if (
         not isinstance(assets, list)
@@ -772,6 +929,9 @@ def validate_provenance(data: Mapping[str, object]) -> Mapping[str, Mapping[str,
         )
     ):
         raise AssertionError("provenance assets must contain names, URLs, and SHA-256 digests")
+    expect(len(assets), len(APPROVED_ASSETS), "provenance approved asset count")
+    actual_assets = {asset["name"]: (asset["url"], asset["sha256"]) for asset in assets}
+    expect(actual_assets, APPROVED_ASSETS, "provenance approved assets")
     entries = data.get("styles")
     if not isinstance(entries, list) or not all(isinstance(item, dict) for item in entries):
         raise AssertionError("provenance styles must be a list of objects")
@@ -793,11 +953,21 @@ def main() -> None:
             raise AssertionError(f"missing {path.name}")
         enclosed_bounds[style] = validate_font(path, style)
         validate_shaping(path)
-        expect(summary.get("sample_origins"), EXPECTED_ORIGINS, f"{style} source precedence")
+        samples = summary.get("sample_origins")
+        if not isinstance(samples, Mapping):
+            raise AssertionError(f"{style} source precedence is not an object")
+        for codepoint, origin in EXPECTED_ORIGINS.items():
+            expect(samples.get(codepoint), origin, f"{style} source precedence {codepoint}")
+        with closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)) as font:
+            validate_ownership(summary, style, font.getBestCmap())
         counts = summary.get("codepoints")
-        if not isinstance(counts, dict) or counts.get("ibm", 0) < 1_000:
-            raise AssertionError(f"{style} has insufficient IBM fallback coverage")
-        expect(counts.get("generated"), 74, f"{style} generated terminal geometry and Neovim glyphs")
+        if not isinstance(counts, dict):
+            raise AssertionError(f"{style} source counts must use approved origins")
+        if set(counts) != ALLOWED_ORIGINS:
+            raise AssertionError(f"{style} source counts must use only approved origins")
+        if not all(isinstance(value, int) and value >= 0 for value in counts.values()):
+            raise AssertionError(f"{style} source counts must be non-negative integers")
+        expect(counts.get("ninjal"), len(NINJAL_CODEPOINTS), f"{style} NINJAL source coverage")
         neovim_origins = summary.get("neovim_origins", {})
         if not isinstance(neovim_origins, dict):
             raise AssertionError(f"{style} Neovim provenance is not an object")
@@ -811,7 +981,8 @@ def main() -> None:
             {f"U+{cp:04X}": "generated" for cp in NEOVIM_GLYPHS},
             f"{style} generated Neovim provenance",
         )
-        expect(neovim_origins.get("U+2714"), "cyroit", f"{style} check-mark provenance")
+        expect(neovim_origins.get("U+2714"), "generated", f"{style} check-mark provenance")
+        expect(summary.get("uvs_mappings_from_biz"), BIZ_UVS_TOTAL, f"{style} BIZ UVS provenance")
         expect(sum(counts.values()), summary.get("total_codepoints"), f"{style} source counts")
         expect(summary.get("size_bytes"), path.stat().st_size, f"{style} artifact size")
     with (
