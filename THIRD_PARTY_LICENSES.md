@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-Summer Ghost is assembled from the approved sources below and from locally generated semantic geometry.
+Summer Ghost is assembled from the approved sources below and from locally generated semantic geometry plus historical terminal outlines embedded locally.
 Copyright and license terms remain with the respective owners.
 This notice supplements, and does not replace, the license files shipped by each source.
 
@@ -55,7 +55,6 @@ This notice supplements, and does not replace, the license files shipped by each
 
 ## Locally generated geometry
 
-Return aliases U+21B5/U+23CE, arrows, U+2713/U+2714, modifiers, box drawing, Block Elements, white parentheses, and uncovered semantic symbols are generated from Unicode meaning and the fixed Summer Ghost cell metrics.
-They have no additional upstream font dependency.
+The historical terminal outlines U+2190..U+2193, U+21B5, U+23CE, U+21D0, and U+21D2 are embedded locally from verified last-good bits and have no external build dependency. U+2713/U+2714, modifiers, box drawing, Block Elements, white parentheses, and uncovered semantic symbols are generated from Unicode meaning and the fixed Summer Ghost cell metrics.
 
 Summer Ghost does not use an upstream reserved font name as its family name and excludes private-use icon ranges.
