@@ -129,7 +129,7 @@ TERMINAL_ROWS = (
     Row("GEOMETRIC II", "□ ■ ▢ ▪ ▫ ▱ ◇ ◆ △ ▲ ▽ ▼ ☆ ★"),
     Row("DAILY / SIGNS", "☀ ☁ ☂ ☃ ☎ ☖ ☗ ☜ ☝ ☞ ☟ ♀ ♂ ♨ ⚠"),
     Row("MUSIC / SUITS", "♩ ♪ ♫ ♬ ♭ ♮ ♯ ♠ ♡ ♢ ♣ ♤ ♥ ♦ ♧"),
-    Row("ARROWS I", "← ↓ ↑ → ↔ ↕ ↖ ↗ ↘ ↙"),
+    Row("ARROWS I", "← ↓ ↑ → ↔ ↕ ↖ ↗ ↘ ↙  ↵ ⏎"),
     Row("ARROWS II", "⇐ ⇒ ⇔ ⇦ ⇧ ⇨ ⇩ ⇄ ⇅ ⇆ ⇋ ⇌ ⇵"),
     Row("MATH", "± × ÷ ≠ ≈ ≤ ≥ ∞ ∑ ∏ √ ∫ ∂ ∆ ∇"),
     Row("BLOCKS", "░ ▒ ▓ █ ▁ ▂ ▃ ▄ ▅ ▆ ▇ ▀ ▌ ▐"),

@@ -37,6 +37,9 @@ HORIZONTAL_ARROW_INK_WIDTH = 500
 CELL_FIT_INK_WIDTH = 500
 ARROW_HEAD_DEPTH_RATIO = 0.80
 BASIC_ARROWS = frozenset(range(0x2190, 0x2194))
+RETURN_ARROW_CODEPOINT = 0x21B5
+RETURN_SYMBOL_CODEPOINT = 0x23CE
+CYROIT_TERMINAL_SYMBOLS = BASIC_ARROWS | {RETURN_ARROW_CODEPOINT}
 HORIZONTAL_ARROWS = {0x2190: True, 0x2192: False}
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
 ENCLOSED_DIGITS = range(0x2460, 0x2474)
@@ -225,9 +228,9 @@ def cell_width(codepoint: int) -> int:
 
 
 def is_adjusted_japanese(codepoint: int) -> bool:
-    """Select Cyroit's adjusted Japanese repertoire and terminal arrows."""
+    """Select Cyroit's adjusted Japanese repertoire and terminal symbols."""
     excluded = codepoint in {0x309B, 0x309C} or 0xFF65 <= codepoint <= 0xFF9F
-    return codepoint in BASIC_ARROWS or (
+    return codepoint in CYROIT_TERMINAL_SYMBOLS or (
         not excluded and any(start <= codepoint <= end for start, end in JAPANESE_RANGES)
     )
 
@@ -812,6 +815,10 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         mapping = {cp: name for cp, name in target.getBestCmap().items() if not is_private_use(cp)}
         origins = dict.fromkeys(mapping, "ubuntu")
         copier = add_codepoints(target, fonts["cyroit"], mapping, origins, "cyroit", is_adjusted_japanese)
+        # Fish hard-codes U+23CE for output without a trailing newline. Reuse
+        # Cyroit's U+21B5 outline so fish and Neovim show the same return mark.
+        mapping[RETURN_SYMBOL_CODEPOINT] = mapping[RETURN_ARROW_CODEPOINT]
+        origins[RETURN_SYMBOL_CODEPOINT] = "cyroit"
         uvs = remap_uvs(fonts["cyroit"], copier, origins)
         add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
         add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
@@ -844,7 +851,8 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         "size_bytes": output.stat().st_size,
         "scales": SOURCE_SCALES,
         "sample_origins": {
-            f"U+{cp:04X}": origins.get(cp) for cp in (0x0041, 0x2190, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
+            f"U+{cp:04X}": origins.get(cp)
+            for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
         },
     }
     print(f"wrote    {output.name}: {len(mapping):,} codepoints, IBM fallback {counts['ibm']:,}, UVS {uvs_count:,}")

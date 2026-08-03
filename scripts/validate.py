@@ -21,6 +21,8 @@ IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 EXPECTED_ORIGINS = {
     "U+0041": "ubuntu",
     "U+2190": "cyroit",
+    "U+21B5": "cyroit",
+    "U+23CE": "cyroit",
     "U+2500": "cyroit",
     "U+3042": "cyroit",
     "U+65E5": "cyroit",
@@ -29,6 +31,8 @@ EXPECTED_ORIGINS = {
 }
 REQUIRED = {
     0x0041: "Ubuntu Mono Latin",
+    0x21B5: "Neovim return arrow",
+    0x23CE: "fish omitted-newline return symbol",
     0x2460: "circled digit one",
     0x2500: "Cyroit box drawing",
     0x2580: "upper half block",
@@ -47,6 +51,8 @@ REQUIRED = {
 UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
 FULL_WIDTH_OVERRIDES = frozenset(WHITE_PARENTHESIS_PAIR)
+RETURN_MARKS = (0x21B5, 0x23CE)
+RETURN_MARK_BOUNDS = {False: (-66, 53, 453, 623), True: (-73, 41, 471, 618)}
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
 VERTICAL_ARROWS = (0x2191, 0x2193)
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
@@ -413,6 +419,9 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             raise AssertionError(f"{path.name} lacks: {', '.join(missing)}")
         if len(cmap) < 15_000:
             raise AssertionError(f"{path.name} maps only {len(cmap)} Unicode codepoints")
+        return_glyphs = tuple(cmap[codepoint] for codepoint in RETURN_MARKS)
+        expect(len(set(return_glyphs)), 1, f"{path.name} return marks share one glyph")
+        expect(_bounds(font, return_glyphs[0]), RETURN_MARK_BOUNDS[bold], f"{path.name} return mark bounds")
         for codepoint, glyph_name in cmap.items():
             expect(
                 font["hmtx"].metrics[glyph_name][0],
@@ -657,6 +666,7 @@ def validate_shaping(path: Path) -> None:
         ("ASCII", "ABC", [512, 512, 512]),
         ("box drawing", "┌─┐", [512, 512, 512]),
         ("compact arrows", "←↓↑→", [512, 512, 512, 512]),
+        ("return marks", "↵⏎", [512, 512]),
         ("mirrored double arrows", "⇐⇒", [512, 512]),
         ("white parentheses", "⦅⦆", [1024, 1024]),
         ("circled digits", "①②③", [512, 512, 512]),
@@ -669,6 +679,8 @@ def validate_shaping(path: Path) -> None:
     ):
         run = shape(font, text)
         expect([advance for _, advance in run], expected, f"{path.name} {label} advances")
+    return_marks = shape(font, "↵⏎")
+    expect(return_marks[0][0], return_marks[1][0], f"{path.name} return marks shape to one glyph")
     text = "".join(chr(cp) for cp in ENCLOSED_DIGITS)
     isolated = [shape(font, char)[0] for char in text]
     expect(shape(font, text), isolated, f"{path.name} circled digits consecutive glyphs")
