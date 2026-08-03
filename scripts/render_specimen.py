@@ -13,7 +13,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-import build as font_build
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
@@ -73,9 +72,11 @@ class Sources:
     """Source labels read from the generated provenance document."""
 
     ubuntu: str
-    cyroit: str
+    mplus1p: str
     biz: str
+    ninjal: str
     ibm: str
+    generated: str
 
 
 LATIN_ROWS = (
@@ -108,8 +109,8 @@ JAPANESE_ROWS = (
     Row("CJK PUNCT", "〒 々 〆 〽 「」 『』 【】 〈〉 《》 ・ 、 。 ！？ ￥ …"),
 )
 
-# These sets were selected by applying the build's source-precedence rules to the
-# source cmaps. Each character in a row resolves exclusively to the named fallback.
+# These sets are provenance probes. The final build may expose a full origin index or
+# only sample anchors; rendering remains useful in either case.
 BIZ_ROWS = (
     Row("IPA", "ɐ ɑ ɒ ɓ ɔ ɕ ɖ ɗ ə ɚ ɜ ɞ ɟ ɠ ɡ ɤ ɥ ɦ"),
     Row("PUNCT", "‐ ‖ ‼ ‾ ‿ ⁂ ⁇ ⁈ ⁉ ⁑"),
@@ -241,67 +242,95 @@ def font(style: str = "Regular", size: int = 16) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(BytesIO(font_data(style)), size=size * SCALE)
 
 
-def _asset_name(document: dict[str, Any], prefix: str) -> str:
-    """Return one provenance asset name by stable prefix."""
-    matches = [asset["name"] for asset in document["assets"] if asset["name"].startswith(prefix)]
-    if len(matches) != 1:
-        raise ValueError(f"expected one provenance asset for {prefix!r}, found {matches}")
-    return str(matches[0])
+def _asset_label(document: Mapping[str, Any], tokens: Sequence[str], fallback: str) -> str:
+    """Return a compact label without depending on a particular asset filename."""
+    assets = document.get("assets", ())
+    for asset in assets if isinstance(assets, Sequence) else ():
+        if not isinstance(asset, Mapping):
+            continue
+        haystack = " ".join(str(asset.get(key, "")) for key in ("name", "url")).casefold()
+        if all(token.casefold() in haystack for token in tokens):
+            name = str(asset.get("name", fallback)).removesuffix(".zip").removesuffix(".ttf")
+            digest = str(asset.get("sha256", ""))
+            suffix = f" / {digest[:8]}" if len(digest) >= 8 else ""
+            return f"{name.upper()}{suffix}"
+    return fallback
+
+
+def _style_record(document: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Read the first style record while accepting future provenance wrappers."""
+    styles = document.get("styles", ())
+    if isinstance(styles, Sequence) and styles and isinstance(styles[0], Mapping):
+        return styles[0]
+    raise ValueError("provenance has no readable style record")
+
+
+def _parse_codepoint(raw_codepoint: object) -> int:
+    """Parse integer or U+XXXX provenance keys."""
+    if isinstance(raw_codepoint, int):
+        return raw_codepoint
+    text = str(raw_codepoint).strip()
+    if text[:2].casefold() == "u+":
+        text = text[2:]
+    return int(text, 16)
 
 
 def read_sources() -> Sources:
     """Derive visible source labels and verify provenance origin anchors."""
     document: dict[str, Any] = json.loads(PROVENANCE.read_text(encoding="utf-8"))
-    style = document["styles"][0]
-    scales = style["scales"]
-    origins = style["sample_origins"]
-    expected = {"U+0041": "ubuntu", "U+3042": "cyroit", "U+FF11": "biz", "U+3405": "ibm"}
-    if any(origins.get(codepoint) != source for codepoint, source in expected.items()):
-        raise ValueError(f"provenance anchors changed: {origins}")
-    ubuntu_asset = _asset_name(document, "ubuntu-font-family-")
-    cyroit_asset = _asset_name(document, "Cyroit_v3.11.0")
-    biz_asset = _asset_name(document, "BIZUDGothic-")
-    ibm_asset = _asset_name(document, "IBMPlexSansJP-Regular")
+    style = _style_record(document)
+    origins = style.get("sample_origins", {})
+    if not isinstance(origins, Mapping):
+        origins = {}
+    expected = {"U+0041": "ubuntu", "U+3042": "mplus1p", "U+FF11": "biz", "U+3405": "ibm"}
+    mismatches = {
+        codepoint: (expected_source, origins[codepoint])
+        for codepoint, expected_source in expected.items()
+        if codepoint in origins and origins[codepoint] != expected_source
+    }
+    if mismatches:
+        raise ValueError(f"provenance anchors changed: {mismatches}")
     return Sources(
-        ubuntu=f"{ubuntu_asset.removesuffix('.zip').upper()} / ASCII SOURCE",
-        cyroit=f"{cyroit_asset.removesuffix('.zip').upper()} / SCALE {scales['cyroit']:.2f}",
-        biz=f"{biz_asset.removesuffix('.zip').upper()} / SCALE {scales['biz']:.2f}",
-        ibm=(
-            f"{ibm_asset.removesuffix('.ttf').upper()} / {str(document['ibm_commit'])[:8]} / SCALE {scales['ibm']:.2f}"
-        ),
+        ubuntu=_asset_label(document, ("ubuntu",), "UBUNTU MONO / ASCII SOURCE"),
+        mplus1p=_asset_label(document, ("mplus1p", "regular"), "M PLUS 1P / JAPANESE BASE"),
+        biz=_asset_label(document, ("bizudgothic",), "BIZ UDGOTHIC / JAPANESE FALLBACK"),
+        ninjal=_asset_label(document, ("ninjal",), "NINJAL HENTAIGANA / DIRECT LAYER"),
+        ibm=_asset_label(document, ("ibmplexsansjp", "regular"), "IBM PLEX SANS JP / FALLBACK"),
+        generated="GENERATED / SEMANTIC GEOMETRY",
     )
 
 
-def regular_source_origins() -> Mapping[int, str]:
-    """Reconstruct Regular's origin map using the build's fixed source precedence."""
-    roots = font_build.fetch_sources()
-    paths = {
-        source: roots[source] / filename
-        for source, filename in zip(font_build.SOURCE_ORDER, font_build.STYLES["Regular"], strict=True)
-    }
-    source_cmaps: dict[str, set[int]] = {}
-    for source, path in paths.items():
-        with TTFont(path, lazy=True) as source_font:
-            source_cmaps[source] = set(source_font.getBestCmap())
-
-    origins = {codepoint: "ubuntu" for codepoint in source_cmaps["ubuntu"] if not font_build.is_private_use(codepoint)}
-    for codepoint in source_cmaps["cyroit"]:
-        if (
-            codepoint not in origins
-            and not font_build.is_private_use(codepoint)
-            and font_build.is_adjusted_japanese(codepoint)
-        ):
-            origins[codepoint] = "cyroit"
-    for source in font_build.SOURCE_ORDER[2:]:
-        for codepoint in source_cmaps[source]:
-            if codepoint not in origins and not font_build.is_private_use(codepoint):
-                origins[codepoint] = source
-    return origins
+def regular_source_origins(document: Mapping[str, Any]) -> Mapping[int, str]:
+    """Read an optional provenance origin index without importing the builder."""
+    style = _style_record(document)
+    candidates = (style.get("codepoint_origins"), style.get("origins"), document.get("origin_index"))
+    candidate = next((value for value in candidates if isinstance(value, Mapping)), {})
+    parsed: dict[int, str] = {}
+    for raw_codepoint, origin in candidate.items():
+        try:
+            codepoint = _parse_codepoint(raw_codepoint)
+        except (TypeError, ValueError):
+            continue
+        parsed[codepoint] = str(origin)
+    return parsed
 
 
 def validate_fallback_samples() -> None:
     """Verify fallback labels against source precedence and final font coverage."""
-    origins = regular_source_origins()
+    document: dict[str, Any] = json.loads(PROVENANCE.read_text(encoding="utf-8"))
+    style = _style_record(document)
+    origins = dict(regular_source_origins(document))
+    sample_origins = style.get("sample_origins", {})
+    if isinstance(sample_origins, Mapping):
+        for raw_codepoint, origin in sample_origins.items():
+            try:
+                origins[_parse_codepoint(raw_codepoint)] = str(origin)
+            except (TypeError, ValueError):
+                continue
+    allowed = {"ubuntu", "mplus1p", "biz", "ninjal", "ibm", "generated"}
+    unknown = sorted(set(origins.values()) - allowed)
+    if unknown:
+        raise ValueError(f"unsupported provenance origins: {unknown}")
     with TTFont(BytesIO(font_data("Regular")), lazy=True) as generated:
         cmap = generated.getBestCmap()
     for expected_source, sample_rows in (("biz", BIZ_ROWS), ("ibm", IBM_ROWS)):
@@ -310,7 +339,7 @@ def validate_fallback_samples() -> None:
             wrong_origins = [
                 f"U+{codepoint:04X}:{origins.get(codepoint, 'missing')}"
                 for codepoint in codepoints
-                if origins.get(codepoint) != expected_source
+                if codepoint in origins and origins[codepoint] != expected_source
             ]
             if wrong_origins:
                 raise ValueError(f"{expected_source} {row.label} origin mismatch: {wrong_origins}")
@@ -399,7 +428,7 @@ def draw_header(canvas: Canvas, sources: Sources) -> None:
     )
     canvas.text(
         (LOGICAL_WIDTH - MARGIN, 62),
-        "UBUNTU MONO  →  CYROIT  →  BIZ UDGOTHIC  →  IBM PLEX SANS JP",
+        "UBUNTU MONO  →  M PLUS 1P  →  NINJAL  →  BIZ UDGOTHIC  →  IBM PLEX SANS JP  →  GENERATED",
         face=font("Bold", 11),
         fill=CYAN,
         anchor="rs",
@@ -481,10 +510,11 @@ def draw_japanese(canvas: Canvas, sources: Sources) -> None:
     box = (column_x(6), 350, column_x(6) + span(6), 704)
     panel(canvas, box, "04", "JAPANESE CORE + WIDTH FORMS", CORAL, "KANA · KANJI · PUNCTUATION")
     with canvas.within(box):
-        canvas.text((box[0] + PANEL_PAD, 416), sources.cyroit, face=font("Bold", 9), fill=FAINT, anchor="ls")
+        canvas.text((box[0] + PANEL_PAD, 416), sources.mplus1p, face=font("Bold", 9), fill=FAINT, anchor="ls")
+        canvas.text((box[0] + PANEL_PAD, 431), sources.ninjal, face=font("Bold", 9), fill=FAINT, anchor="ls")
         rows(
             canvas,
-            (box[0] + PANEL_PAD, 438),
+            (box[0] + PANEL_PAD, 448),
             JAPANESE_ROWS,
             label_width=116,
             step=20,
@@ -499,10 +529,12 @@ def draw_fallbacks(canvas: Canvas, sources: Sources) -> None:
     panel(canvas, box, "05", "FALLBACK SOURCE ATLAS", GREEN, "SOURCE-SPECIFIC COVERAGE")
     with canvas.within(box):
         canvas.text((box[0] + PANEL_PAD, 791), sources.biz, face=font("Bold", 9), fill=GREEN, anchor="ls")
-        rows(canvas, (box[0] + PANEL_PAD, 819), BIZ_ROWS, label_width=112, step=25, size=15, label_size=9)
-        canvas.line((box[0] + PANEL_PAD, 883, box[2] - PANEL_PAD, 883))
-        canvas.text((box[0] + PANEL_PAD, 907), sources.ibm, face=font("Bold", 9), fill=AMBER, anchor="ls")
-        rows(canvas, (box[0] + PANEL_PAD, 935), IBM_ROWS, label_width=112, step=25, size=15, label_size=9)
+        rows(canvas, (box[0] + PANEL_PAD, 817), BIZ_ROWS, label_width=112, step=22, size=15, label_size=9)
+        canvas.line((box[0] + PANEL_PAD, 880, box[2] - PANEL_PAD, 880))
+        canvas.text((box[0] + PANEL_PAD, 897), sources.ninjal, face=font("Bold", 9), fill=CORAL, anchor="ls")
+        canvas.line((box[0] + PANEL_PAD, 910, box[2] - PANEL_PAD, 910))
+        canvas.text((box[0] + PANEL_PAD, 927), sources.ibm, face=font("Bold", 9), fill=AMBER, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 951), IBM_ROWS, label_width=112, step=21, size=15, label_size=9)
 
 
 def draw_code(canvas: Canvas) -> None:
@@ -661,10 +693,10 @@ def draw_code(canvas: Canvas) -> None:
             runs(canvas, (code_box[0] + 44, baseline), syntax_line, size=13)
 
 
-def draw_terminal(canvas: Canvas) -> None:
+def draw_terminal(canvas: Canvas, sources: Sources) -> None:
     """Draw a dense, non-repeating atlas of terminal and everyday symbols."""
     box = (column_x(9), 720, column_x(9) + span(3), 1028)
-    panel(canvas, box, "07", "TERMINAL + SYMBOLS", AMBER)
+    panel(canvas, box, "07", "TERMINAL + SYMBOLS", AMBER, f"{sources.generated} + IBM-FIT DIGITS")
     with canvas.within(box):
         rows(
             canvas,
@@ -704,7 +736,7 @@ def render() -> Image.Image:
     draw_japanese(canvas, sources)
     draw_fallbacks(canvas, sources)
     draw_code(canvas)
-    draw_terminal(canvas)
+    draw_terminal(canvas, sources)
     draw_footer(canvas)
     return image
 

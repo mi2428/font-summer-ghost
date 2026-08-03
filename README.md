@@ -3,8 +3,6 @@
 A Japanese monospace font for Ghostty.
 It combines Ubuntu Mono Latin glyphs with a compatible, familiar Japanese layer and deterministic terminal geometry.
 
-## Source architecture
-
 - [Ubuntu Mono](https://design.ubuntu.com/font) supplies Latin and the base for modifier symbols.
 - [M PLUS 1p](https://fonts.google.com/specimen/M+PLUS+1p) Regular/Bold supply the primary Japanese glyph selection and are fetched from a pinned Google Fonts revision for reproducible builds.
 - [NINJAL Hentaigana](https://cid.ninjal.ac.jp/kana/font/) supplies its dedicated 288-codepoint layer directly from the official distribution.
@@ -13,11 +11,9 @@ It combines Ubuntu Mono Latin glyphs with a compatible, familiar Japanese layer 
 - Return marks, arrows, check marks, modifiers, box/block drawing, and other semantic terminal geometry are generated locally from documented cell rules.
   Enclosed digits retain IBM Plex Sans JP outlines and receive a local cell fit.
 
-The authoritative precedence is Ubuntu Mono → M PLUS 1p → NINJAL Hentaigana (288 codepoints) → BIZ UDGothic → IBM Plex Sans JP → generated geometry.
+![](specimen.png)
 
-Source ownership, pinned URLs, SHA-256 values, and licenses are recorded in `dist/provenance.json` and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-
-## Metrics and rendering
+### Metrics and rendering
 
 - UPM 1024 with 512-unit half-width and 1024-unit full-width cells.
 - Ascent 850, descent 174, line gap 0, and fixed-pitch advances.
@@ -25,8 +21,6 @@ Source ownership, pinned URLs, SHA-256 values, and licenses are recorded in `dis
 - The Japanese layer and terminal symbols are fitted for stable one-cell and two-cell rendering.
   Ghostty may still apply contextual fitting to symbol-like characters, so apparent size can vary with neighboring cells or IME state.
 - The specimen shows source roles and generated geometry without asserting exact visual identity.
-
-![](specimen.png)
 
 ## Installation
 
