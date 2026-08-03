@@ -17,15 +17,18 @@ Summer Ghost is built locally from, or contains outlines derived from, the font 
 - License: See `LICENSE_E` and `LICENSE_J` in the upstream archive
 - Copyright: M+ FONTS PROJECT and itouhiro
 
-## Cyroit (from Ubroit v1.8.0)
+## Cyroit 3.11.0
 
-- Source: https://github.com/omonomo/Ubroit/tree/v1.8.0
-- Files used: `sourceFonts/Cyroit.nopatch/Cyroit-Regular.nopatch.ttf` and `Cyroit-Bold.nopatch.ttf`
-- Embedded Cyroit version: 3.11.0, as reported by the binaries' name tables
+- Source: https://github.com/omonomo/Cyroit/tree/v3.11.0
+- Archive: https://github.com/omonomo/Cyroit/releases/download/v3.11.0/Cyroit_v3.11.0.zip
+- Files used: `BS/CyroitBS-Regular.ttf` and `BS/CyroitBS-Bold.ttf`
 - Purpose: Adjusted Circle M+ and BIZ UDGothic Japanese glyphs
 - Binary font license: SIL Open Font License 1.1
-- Upstream build-script license: MIT License
+- Upstream source/build-script license: MIT License
 - Copyright: omonomo and the respective source-font authors
+
+Ubroit is not a build input or runtime dependency. Any Ubroit reference in the
+implementation is historical, one-time algorithm provenance only.
 
 The Cyroit name-table notice additionally credits the Inconsolata Project Authors, the National Institute for Japanese Language and Linguistics for NINJAL Hentaigana, and Ryan McIntyre for Symbols Nerd Font. Summer Ghost imports only selected Japanese mappings from Cyroit and rejects all private-use mappings; it does not intentionally import Inconsolata Latin glyphs or Nerd Fonts icons.
 
