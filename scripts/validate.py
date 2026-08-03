@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from contextlib import closing
@@ -157,11 +158,12 @@ REQUIRED = {
 WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
 FULL_WIDTH_OVERRIDES = frozenset(WHITE_PARENTHESIS_PAIR)
 RETURN_MARKS = (0x21B5, 0x23CE)
-RETURN_MARK_BOUNDS = {False: (48, 310, 448, 646), True: (48, 302, 456, 646)}
+RETURN_MARK_BOUNDS = {False: (-66, 53, 453, 623), True: (-73, 41, 471, 618)}
 CHECK_MARK_CODEPOINT = 0x2714
 CHECK_MARK_BOUNDS = {False: (35, 163, 499, 717), True: (25, 158, 508, 722)}
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
 VERTICAL_ARROWS = (0x2191, 0x2193)
+BASIC_ARROWS = HORIZONTAL_ARROWS + VERTICAL_ARROWS
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
 ENCLOSED_DIGITS = range(0x2460, 0x2474)
 ENCLOSED_DIGIT_INK_SIZE = {False: (630, 846), True: (644, 866)}
@@ -249,17 +251,17 @@ CELL_FIT_HEIGHTS = {
 }
 UNCHANGED_AUDITED_BOUNDS = {
     False: {
-        0x2190: (44, 310, 468, 404),
-        0x2191: (190, 338, 322, 806),
-        0x2192: (44, 310, 468, 404),
-        0x2193: (190, -130, 322, 338),
+        0x2190: (6, 113, 506, 567),
+        0x2191: (29, 22, 483, 695),
+        0x2192: (6, 113, 506, 567),
+        0x2193: (29, -15, 483, 659),
         0x25C9: (47, 129, 466, 548),
     },
     True: {
-        0x2190: (44, 302, 468, 413),
-        0x2191: (181, 338, 331, 806),
-        0x2192: (44, 302, 468, 413),
-        0x2193: (181, -130, 331, 338),
+        0x2190: (6, 107, 506, 574),
+        0x2191: (22, 14, 490, 701),
+        0x2192: (6, 107, 506, 574),
+        0x2193: (21, -20, 489, 667),
         0x25C9: (43, 126, 469, 552),
     },
 }
@@ -331,7 +333,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (55, -18, 430, 716),
         0x0041: (9, 0, 503, 653),
-        0x2190: (44, 310, 468, 404),
+        0x2190: (6, 113, 506, 567),
         0x2500: (0, 295, 512, 381),
     },
     "Italic": {
@@ -340,7 +342,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (55, -18, 430, 716),
         0x0041: (-13, 0, 480, 653),
-        0x2190: (44, 310, 468, 404),
+        0x2190: (6, 113, 506, 567),
         0x2500: (0, 295, 512, 381),
     },
     "Bold": {
@@ -349,7 +351,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (46, -35, 438, 724),
         0x0041: (9, 0, 503, 653),
-        0x2190: (44, 302, 468, 413),
+        0x2190: (6, 107, 506, 574),
         0x2500: (0, 282, 512, 394),
     },
     "BoldItalic": {
@@ -358,7 +360,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (46, -35, 438, 724),
         0x0041: (-6, 0, 487, 653),
-        0x2190: (44, 302, 468, 413),
+        0x2190: (6, 107, 506, 574),
         0x2500: (0, 282, 512, 394),
     },
 }
@@ -563,6 +565,276 @@ def _contour_bounds(font: TTFont, glyph_name: str) -> tuple[tuple[int, int, int,
         )
         start = end + 1
     return tuple(sorted(contours))
+
+
+_LEGACY_ARROW_POINTS = {
+    False: {
+        0x2190: (
+            (129, 309),
+            (303, 156),
+            (266, 113),
+            (6, 340),
+            (266, 567),
+            (303, 524),
+            (129, 372),
+            (506, 372),
+            (506, 309),
+        ),
+        0x2191: (
+            (224, 573),
+            (72, 399),
+            (29, 436),
+            (256, 695),
+            (483, 436),
+            (440, 399),
+            (288, 573),
+            (288, 22),
+            (224, 22),
+        ),
+        0x2192: (
+            (6, 372),
+            (382, 372),
+            (209, 524),
+            (246, 567),
+            (506, 340),
+            (246, 113),
+            (209, 156),
+            (382, 309),
+            (6, 309),
+        ),
+        0x2193: (
+            (288, 107),
+            (440, 281),
+            (483, 244),
+            (256, -15),
+            (29, 244),
+            (72, 281),
+            (224, 107),
+            (224, 659),
+            (288, 659),
+        ),
+        0x21D0: (
+            (201, 155),
+            (6, 350),
+            (201, 546),
+            (233, 516),
+            (144, 428),
+            (506, 428),
+            (506, 390),
+            (106, 390),
+            (67, 350),
+            (106, 311),
+            (506, 311),
+            (506, 273),
+            (144, 273),
+            (233, 184),
+        ),
+        0x21D2: (
+            (311, 155),
+            (506, 350),
+            (311, 546),
+            (279, 516),
+            (368, 428),
+            (6, 428),
+            (6, 390),
+            (406, 390),
+            (445, 350),
+            (406, 311),
+            (6, 311),
+            (6, 273),
+            (368, 273),
+            (279, 184),
+        ),
+    },
+    True: {
+        0x2190: (
+            (181, 292),
+            (326, 165),
+            (276, 107),
+            (6, 340),
+            (276, 574),
+            (326, 515),
+            (181, 388),
+            (506, 388),
+            (506, 292),
+        ),
+        0x2191: (
+            (208, 526),
+            (81, 380),
+            (22, 431),
+            (256, 701),
+            (490, 431),
+            (431, 380),
+            (304, 526),
+            (304, 14),
+            (208, 14),
+        ),
+        0x2192: (
+            (6, 388),
+            (331, 388),
+            (186, 515),
+            (236, 574),
+            (506, 340),
+            (236, 107),
+            (186, 165),
+            (331, 292),
+            (6, 292),
+        ),
+        0x2193: (
+            (303, 154),
+            (430, 301),
+            (489, 249),
+            (255, -20),
+            (21, 249),
+            (80, 301),
+            (207, 154),
+            (207, 667),
+            (303, 667),
+        ),
+        0x21D0: (
+            (226, 130),
+            (6, 350),
+            (226, 570),
+            (279, 523),
+            (201, 446),
+            (506, 446),
+            (506, 387),
+            (141, 387),
+            (104, 350),
+            (141, 313),
+            (506, 313),
+            (506, 254),
+            (201, 254),
+            (279, 177),
+        ),
+        0x21D2: (
+            (286, 130),
+            (506, 350),
+            (286, 570),
+            (233, 523),
+            (311, 446),
+            (6, 446),
+            (6, 387),
+            (371, 387),
+            (408, 350),
+            (371, 313),
+            (6, 313),
+            (6, 254),
+            (311, 254),
+            (233, 177),
+        ),
+    },
+}
+_LEGACY_ARROW_NAMES = {
+    0x2190: "arrowleft",
+    0x2191: "arrowup",
+    0x2192: "arrowright",
+    0x2193: "arrowdown",
+    0x21D0: "arrowdblleft",
+    0x21D2: "arrowdblright",
+}
+_LEGACY_ARROW_LSB = {
+    False: {0x2190: 6, 0x2191: 29, 0x2192: 6, 0x2193: 29, 0x21D0: 6, 0x21D2: 6},
+    True: {0x2190: 6, 0x2191: 22, 0x2192: 6, 0x2193: 21, 0x21D0: 6, 0x21D2: 6},
+}
+_LEGACY_ARROW_HASH = {
+    False: {
+        0x2190: "d5de5c36d135e8101d492f1d4318ef8f10b49d8c28b370c0fd0c11536c2e2479",
+        0x2191: "f1f15f7efbb56277204b83e4d9c60e1903e9182b1b87dbfe2938206d2ccafcc3",
+        0x2192: "f65d4803a8149e004067a740b2719663ca7d5166dad6e233bd889dc573bf568b",
+        0x2193: "2e93e9e4bbb5900cc5ed500de92d9c619fcc38959bf2c4cabdc78d9421f8d212",
+        0x21D0: "dbbfc9b3236e006e23fe6c74de08470d5e707abd89435522a08bc6b520f42dbf",
+        0x21D2: "ec36bc2838a6060804c5e8535716f9781f1d528fd3e174350c61933a56353dfc",
+    },
+    True: {
+        0x2190: "50ab0e6e09794328f397c1116aabf7df0591aa6e7cd9573b3ab830958dbcdd88",
+        0x2191: "022172ffb68f57c79c1a3de46da978a0d3c89dcd0b2baa10bac06cec606a1c00",
+        0x2192: "a32d22d48e60f5d599b4785c907314e5e63ff8cdd447d9d08784b6752d8a01e3",
+        0x2193: "117eef6c0e4ef2c44406a23d2dff83987c77e03c9b899d7c97a7ae9a25d450d2",
+        0x21D0: "5a9ed0e52a5e01a96d8e1ac56f721149588d84901b0617291b11ed4440f5e2b3",
+        0x21D2: "814cf022e425f0a9af5d6624b73b3a853ed8e93d055200e5e4638482d78ad757",
+    },
+}
+_LEGACY_ARROW_BOUNDS = {
+    False: {
+        0x2190: (6, 113, 506, 567),
+        0x2191: (29, 22, 483, 695),
+        0x2192: (6, 113, 506, 567),
+        0x2193: (29, -15, 483, 659),
+        0x21D0: (6, 155, 506, 546),
+        0x21D2: (6, 155, 506, 546),
+    },
+    True: {
+        0x2190: (6, 107, 506, 574),
+        0x2191: (22, 14, 490, 701),
+        0x2192: (6, 107, 506, 574),
+        0x2193: (21, -20, 489, 667),
+        0x21D0: (6, 130, 506, 570),
+        0x21D2: (6, 130, 506, 570),
+    },
+}
+_LEGACY_RETURN_POINTS = {
+    False: (
+        (58, 248),
+        (231, 96),
+        (193, 53),
+        (-66, 280),
+        (193, 506),
+        (231, 463),
+        (58, 311),
+        (390, 311),
+        (390, 623),
+        (453, 623),
+        (453, 248),
+    ),
+    True: (
+        (102, 227),
+        (247, 100),
+        (197, 41),
+        (-73, 275),
+        (197, 508),
+        (247, 450),
+        (102, 323),
+        (374, 323),
+        (374, 618),
+        (471, 618),
+        (471, 227),
+    ),
+}
+_LEGACY_RETURN_HASH = {
+    False: "74b2bec4d49be203850ad9e66160cea43abcaef43b595bcd896adbba6f1db600",
+    True: "ef75687c21a9d8b2104bb79399d3d19541cf80ae4616795092d81fed06b10619",
+}
+
+
+def validate_legacy_arrows(font: TTFont, style: str) -> None:
+    """Require exact last-good six-glyph representation."""
+    bold = "Bold" in style
+    cmap, glyf = font.getBestCmap(), font["glyf"]
+    expect(cmap[0x21B5], cmap[0x23CE], f"{style} return cmap alias identity")
+    for codepoint in (*BASIC_ARROWS, 0x21B5, 0x23CE, 0x21D0, 0x21D2):
+        glyph_name = cmap[codepoint]
+        points = _LEGACY_RETURN_POINTS[bold] if codepoint in RETURN_MARKS else _LEGACY_ARROW_POINTS[bold][codepoint]
+        expected_name = "carriagereturn" if codepoint in RETURN_MARKS else _LEGACY_ARROW_NAMES[codepoint]
+        expected_lsb = (-66 if not bold else -73) if codepoint in RETURN_MARKS else _LEGACY_ARROW_LSB[bold][codepoint]
+        expected_hash = _LEGACY_RETURN_HASH[bold] if codepoint in RETURN_MARKS else _LEGACY_ARROW_HASH[bold][codepoint]
+        glyph = glyf[glyph_name]
+        expect(glyph_name, expected_name, f"{style} U+{codepoint:04X} cmap glyph")
+        expect(font["hmtx"].metrics[glyph_name], (512, expected_lsb), f"{style} U+{codepoint:04X} hmtx")
+        expect(glyph.numberOfContours, 1, f"{style} U+{codepoint:04X} contours")
+        actual, ends, flags = glyph.getCoordinates(glyf)
+        expect(tuple((int(x), int(y)) for x, y in actual), points, f"{style} U+{codepoint:04X} coordinates")
+        expect(tuple(int(x) for x in ends), (len(points) - 1,), f"{style} U+{codepoint:04X} endPts")
+        expect(tuple(int(x) for x in flags), (1,) * len(points), f"{style} U+{codepoint:04X} flags")
+        expected_bounds = (
+            RETURN_MARK_BOUNDS[bold] if codepoint in RETURN_MARKS else _LEGACY_ARROW_BOUNDS[bold][codepoint]
+        )
+        expect(_bounds(font, glyph_name), expected_bounds, f"{style} U+{codepoint:04X} bounds")
+        expect(
+            hashlib.sha256(glyph.compile(glyf)).hexdigest(),
+            expected_hash,
+            f"{style} U+{codepoint:04X} glyf fingerprint",
+        )
 
 
 def _computed_global_metrics(font: TTFont) -> dict[str, int]:
@@ -923,6 +1195,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             [(1024 - x, y) for x, y in right_points],
             f"{path.name} exact white parenthesis mirror",
         )
+        validate_legacy_arrows(font, style)
         for cp in HORIZONTAL_ARROWS:
             x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
             if x_min < 0 or x_max > 512 or x_max <= x_min or y_max <= y_min:

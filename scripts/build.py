@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import shutil
 import stat
 import urllib.request
@@ -756,96 +755,218 @@ def replace_box_drawing(
         origins[codepoint] = "generated"
 
 
-def _make_arrow_glyph(codepoint: int, bold: bool) -> Any:
-    """Generate a deterministic single-stroke arrow for one terminal cell."""
-    thickness, head = (72, 150) if bold else (56, 132)
-    center = (ASCENT - DESCENT) // 2
-    if codepoint in (0x2190, 0x2192):
-        left = codepoint == 0x2190
-        tip, base = (44, head) if left else (HALF_WIDTH - 44, HALF_WIDTH - head)
-        polygon = (
-            (tip, center),
-            (base, center + head // 2),
-            (base, center + thickness // 2),
-            (HALF_WIDTH - 44 if left else 44, center + thickness // 2),
-            (HALF_WIDTH - 44 if left else 44, center - thickness // 2),
-            (base, center - thickness // 2),
-        )
-        return _make_polygon_glyph(polygon)
-    up = codepoint == 0x2191
-    tip, base = (ASCENT - 44, ASCENT - head) if up else (-DESCENT + 44, -DESCENT + head)
-    y0, y1 = sorted((base, center))
-    return _make_polygon_glyph(
-        (
-            (HALF_WIDTH // 2, tip),
-            (HALF_WIDTH // 2 + head // 2, base),
-            (HALF_WIDTH // 2 + thickness // 2, base),
-            (HALF_WIDTH // 2 + thickness // 2, y1),
-            (HALF_WIDTH // 2 - thickness // 2, y1),
-            (HALF_WIDTH // 2 - thickness // 2, y0),
-            (HALF_WIDTH // 2 - head // 2, base),
-        )
-    )
-
-
-def _draw_thick_segment(
-    pen: TTGlyphPen,
-    start: tuple[int, int],
-    end: tuple[int, int],
-    thickness: int,
-) -> None:
-    """Draw one deterministic thick line segment from independent geometry."""
-    x0, y0 = start
-    x1, y1 = end
-    dx, dy = x1 - x0, y1 - y0
-    length = max(math.hypot(dx, dy), 1.0)
-    half = thickness / 2
-    nx, ny = round(-dy * half / length), round(dx * half / length)
-    _draw_polygon(
-        pen,
-        (
-            (x0 + nx, y0 + ny),
-            (x1 + nx, y1 + ny),
-            (x1 - nx, y1 - ny),
-            (x0 - nx, y0 - ny),
+_LEGACY_ARROW_POINTS: Mapping[bool, Mapping[int, tuple[tuple[int, int], ...]]] = {
+    False: {
+        0x2190: (
+            (129, 309),
+            (303, 156),
+            (266, 113),
+            (6, 340),
+            (266, 567),
+            (303, 524),
+            (129, 372),
+            (506, 372),
+            (506, 309),
         ),
-    )
+        0x2191: (
+            (224, 573),
+            (72, 399),
+            (29, 436),
+            (256, 695),
+            (483, 436),
+            (440, 399),
+            (288, 573),
+            (288, 22),
+            (224, 22),
+        ),
+        0x2192: (
+            (6, 372),
+            (382, 372),
+            (209, 524),
+            (246, 567),
+            (506, 340),
+            (246, 113),
+            (209, 156),
+            (382, 309),
+            (6, 309),
+        ),
+        0x2193: (
+            (288, 107),
+            (440, 281),
+            (483, 244),
+            (256, -15),
+            (29, 244),
+            (72, 281),
+            (224, 107),
+            (224, 659),
+            (288, 659),
+        ),
+        0x21D0: (
+            (201, 155),
+            (6, 350),
+            (201, 546),
+            (233, 516),
+            (144, 428),
+            (506, 428),
+            (506, 390),
+            (106, 390),
+            (67, 350),
+            (106, 311),
+            (506, 311),
+            (506, 273),
+            (144, 273),
+            (233, 184),
+        ),
+        0x21D2: (
+            (311, 155),
+            (506, 350),
+            (311, 546),
+            (279, 516),
+            (368, 428),
+            (6, 428),
+            (6, 390),
+            (406, 390),
+            (445, 350),
+            (406, 311),
+            (6, 311),
+            (6, 273),
+            (368, 273),
+            (279, 184),
+        ),
+    },
+    True: {
+        0x2190: (
+            (181, 292),
+            (326, 165),
+            (276, 107),
+            (6, 340),
+            (276, 574),
+            (326, 515),
+            (181, 388),
+            (506, 388),
+            (506, 292),
+        ),
+        0x2191: (
+            (208, 526),
+            (81, 380),
+            (22, 431),
+            (256, 701),
+            (490, 431),
+            (431, 380),
+            (304, 526),
+            (304, 14),
+            (208, 14),
+        ),
+        0x2192: (
+            (6, 388),
+            (331, 388),
+            (186, 515),
+            (236, 574),
+            (506, 340),
+            (236, 107),
+            (186, 165),
+            (331, 292),
+            (6, 292),
+        ),
+        0x2193: (
+            (303, 154),
+            (430, 301),
+            (489, 249),
+            (255, -20),
+            (21, 249),
+            (80, 301),
+            (207, 154),
+            (207, 667),
+            (303, 667),
+        ),
+        0x21D0: (
+            (226, 130),
+            (6, 350),
+            (226, 570),
+            (279, 523),
+            (201, 446),
+            (506, 446),
+            (506, 387),
+            (141, 387),
+            (104, 350),
+            (141, 313),
+            (506, 313),
+            (506, 254),
+            (201, 254),
+            (279, 177),
+        ),
+        0x21D2: (
+            (286, 130),
+            (506, 350),
+            (286, 570),
+            (233, 523),
+            (311, 446),
+            (6, 446),
+            (6, 387),
+            (371, 387),
+            (408, 350),
+            (371, 313),
+            (6, 313),
+            (6, 254),
+            (311, 254),
+            (233, 177),
+        ),
+    },
+}
+_LEGACY_ARROW_LSB = {
+    False: {0x2190: 6, 0x2191: 29, 0x2192: 6, 0x2193: 29, 0x21D0: 6, 0x21D2: 6},
+    True: {0x2190: 6, 0x2191: 22, 0x2192: 6, 0x2193: 21, 0x21D0: 6, 0x21D2: 6},
+}
+_LEGACY_RETURN_POINTS = {
+    False: (
+        (58, 248),
+        (231, 96),
+        (193, 53),
+        (-66, 280),
+        (193, 506),
+        (231, 463),
+        (58, 311),
+        (390, 311),
+        (390, 623),
+        (453, 623),
+        (453, 248),
+    ),
+    True: (
+        (102, 227),
+        (247, 100),
+        (197, 41),
+        (-73, 275),
+        (197, 508),
+        (247, 450),
+        (102, 323),
+        (374, 323),
+        (374, 618),
+        (471, 618),
+        (471, 227),
+    ),
+}
+_LEGACY_RETURN_LSB = {False: -66, True: -73}
 
 
-def _make_double_arrow_glyph(bold: bool) -> Any:
-    """Generate a distinct double horizontal arrow with rails and chevrons."""
-    center = (ASCENT - DESCENT) // 2
-    rail_thickness, chevron_thickness = (56, 56) if bold else (44, 44)
-    rail_offset = 48 if bold else 42
+def _legacy_arrow_glyph(codepoint: int, bold: bool) -> Any:
+    """Construct one exact last-good arrow from embedded on-curve points."""
     pen = TTGlyphPen(None)
-    for y in (center - rail_offset, center + rail_offset):
-        _draw_rectangle(pen, (132, y - rail_thickness // 2, 452, y + rail_thickness // 2))
-    _draw_thick_segment(pen, (48, center), (166, center + 108), chevron_thickness)
-    _draw_thick_segment(pen, (48, center), (166, center - 108), chevron_thickness)
-    _draw_thick_segment(pen, (104, center), (210, center + 78), max(28, chevron_thickness // 2))
-    _draw_thick_segment(pen, (104, center), (210, center - 78), max(28, chevron_thickness // 2))
+    points = _LEGACY_ARROW_POINTS[bold][codepoint]
+    pen.moveTo(points[0])
+    for point in points[1:]:
+        pen.lineTo(point)
+    pen.closePath()
     return pen.glyph()
 
 
-def _make_return_arrow_glyph(bold: bool) -> Any:
-    """Generate the shared return-mark outline for U+21B5 and U+23CE."""
-    thickness, head = (72, 132) if bold else (56, 112)
-    center = (ASCENT - DESCENT) // 2
-    hook_top = round(ASCENT * 0.76)
+def _legacy_return_glyph(bold: bool) -> Any:
+    """Construct the exact last-good shared return glyph from local points."""
     pen = TTGlyphPen(None)
-    _draw_rectangle(pen, (120, center - thickness // 2, 420, center + thickness // 2))
-    _draw_rectangle(pen, (420 - thickness // 2, center, 420 + thickness // 2, hook_top))
-    _draw_polygon(
-        pen,
-        (
-            (48, center),
-            (48 + head, center + head // 2),
-            (48 + head, center + thickness // 2),
-            (120, center + thickness // 2),
-            (120, center - thickness // 2),
-            (48 + head, center - thickness // 2),
-        ),
-    )
+    points = _LEGACY_RETURN_POINTS[bold]
+    pen.moveTo(points[0])
+    for point in points[1:]:
+        pen.lineTo(point)
+    pen.closePath()
     return pen.glyph()
 
 
@@ -855,17 +976,18 @@ def install_terminal_semantics(
     origins: MutableMapping[int, str],
     bold: bool,
 ) -> None:
-    """Install locally specified arrows and return/check semantics."""
+    """Install embedded last-good arrows and preserve return-mark semantics."""
     for codepoint in sorted(BASIC_ARROWS):
-        _set_mapped_glyph(font, cmap, codepoint, _make_arrow_glyph(codepoint, bold), "arrow")
+        _replace_glyph(font, cmap[codepoint], _legacy_arrow_glyph(codepoint, bold))
+        font["hmtx"].metrics[cmap[codepoint]] = (HALF_WIDTH, _LEGACY_ARROW_LSB[bold][codepoint])
         origins[codepoint] = "generated"
-    left = _make_double_arrow_glyph(bold)
-    right = _transform_glyph(left, (-1, 0, 0, 1, HALF_WIDTH, 0))
-    for codepoint, glyph in ((0x21D0, left), (0x21D2, right)):
-        _set_mapped_glyph(font, cmap, codepoint, glyph, "arrow")
+    for codepoint in (0x21D0, 0x21D2):
+        _replace_glyph(font, cmap[codepoint], _legacy_arrow_glyph(codepoint, bold))
+        font["hmtx"].metrics[cmap[codepoint]] = (HALF_WIDTH, _LEGACY_ARROW_LSB[bold][codepoint])
         origins[codepoint] = "generated"
-    return_glyph = _make_return_arrow_glyph(bold)
+    return_glyph = _legacy_return_glyph(bold)
     _set_mapped_glyph(font, cmap, RETURN_ARROW_CODEPOINT, return_glyph, "return")
+    font["hmtx"].metrics[cmap[RETURN_ARROW_CODEPOINT]] = (HALF_WIDTH, _LEGACY_RETURN_LSB[bold])
     cmap[RETURN_SYMBOL_CODEPOINT] = cmap[RETURN_ARROW_CODEPOINT]
     origins[RETURN_ARROW_CODEPOINT] = origins[RETURN_SYMBOL_CODEPOINT] = "generated"
 
