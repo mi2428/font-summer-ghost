@@ -25,7 +25,10 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
 from fontTools.ttLib.tables.O_S_2f_2 import calcCodePageRanges, intersectUnicodeRanges
+from pathops import Path as PathOpsPath
+from pathops import PathPen, intersection, union
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE, DIST = ROOT / ".cache", ROOT / "dist"
@@ -91,6 +94,53 @@ JAPANESE_RANGES = (
 UNICODE17_WIDE_CODEPOINTS = (0x2FFC, 0x2FFD, 0x2FFE, 0x2FFF, 0x31EF)
 WHITE_PARENTHESIS_SOURCE = 0xFF5F
 FULL_WIDTH_OVERRIDES = frozenset({0x2985, 0x2986})
+
+NEOVIM_GLYPHS: Mapping[int, int] = {
+    0x02B3: 0x72,
+    0x02B8: 0x79,
+    0x02E2: 0x73,
+    0x02E3: 0x78,
+    0x1D2C: 0x41,
+    0x1D2E: 0x42,
+    0x1D30: 0x44,
+    0x1D31: 0x45,
+    0x1D33: 0x47,
+    0x1D34: 0x48,
+    0x1D35: 0x49,
+    0x1D36: 0x4A,
+    0x1D37: 0x4B,
+    0x1D38: 0x4C,
+    0x1D39: 0x4D,
+    0x1D3A: 0x4E,
+    0x1D3C: 0x4F,
+    0x1D3E: 0x50,
+    0x1D3F: 0x52,
+    0x1D40: 0x54,
+    0x1D41: 0x55,
+    0x1D42: 0x57,
+    0x1D43: 0x61,
+    0x1D47: 0x62,
+    0x1D48: 0x64,
+    0x1D49: 0x65,
+    0x1D4D: 0x67,
+    0x1D4F: 0x6B,
+    0x1D50: 0x6D,
+    0x1D52: 0x6F,
+    0x1D56: 0x70,
+    0x1D57: 0x74,
+    0x1D58: 0x75,
+    0x1D5B: 0x76,
+    0x1D9C: 0x63,
+    0x1DA0: 0x66,
+    0x1DBB: 0x7A,
+    0x2071: 0x69,
+    0x207B: 0x2D,
+    0x207D: 0x28,
+    0x207E: 0x29,
+    0x207F: 0x6E,
+    0x2C7D: 0x56,
+}
+NEOVIM_CHECK = 0x2714
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +328,136 @@ def _replay_transformed(
             pen.endPath()
         else:
             raise ValueError(f"Unsupported outline operation {operation}")
+
+
+def _scratch_glyph(font: TTFont, codepoint: int, move_x: int = 0) -> Any:
+    """Decompose one Ubuntu ASCII glyph into an independent scratch outline."""
+    name = font.getBestCmap()[codepoint]
+    recording, pen = DecomposingRecordingPen(font.getGlyphSet()), TTGlyphPen(None)
+    font.getGlyphSet()[name].draw(recording)
+    recording.replay(TransformPen(pen, (1, 0, 0, 1, move_x, 0)))
+    return pen.glyph()
+
+
+def _superscript_glyph(glyph: Any, pre_final_move_y: int = 0) -> Any:
+    """Apply the Ubroit-compatible superscript transform in its specified order."""
+    recording = DecomposingRecordingPen({"scratch": glyph})
+    glyph.draw(recording, None)
+
+    def transform(point: tuple[float, float]) -> tuple[float, float]:
+        x, y = point
+        x = 0.64 * (x - 256) + 256
+        y = 0.54 * y
+        y += 282
+        x = 1.34 * (x - 256) + 256
+        y = 1.34 * (y - 462) + 462
+        y += pre_final_move_y
+        y *= 1.03
+        return round(x), round(y)
+
+    pen = TTGlyphPen(None)
+    _replay_transformed(recording, pen, transform)
+    return pen.glyph()
+
+
+def _transform_glyph(glyph: Any, transform: tuple[float, float, float, float, float, float]) -> Any:
+    recording, pen = DecomposingRecordingPen({"scratch": glyph}), TTGlyphPen(None)
+    glyph.draw(recording, None)
+    recording.replay(TransformPen(pen, transform))
+    return pen.glyph()
+
+
+def _path_glyph(glyph: Any) -> PathOpsPath:
+    path = PathOpsPath()
+    glyph.draw(PathPen(path), None)
+    return path
+
+
+def _boolean_glyph(subject: Any, clips: Iterable[Any], operation: str) -> Any:
+    """Isolated skia-pathops Boolean helper for the generator's cut/paste edits."""
+    out = PathOpsPath()
+    subject_path, clip_paths = _path_glyph(subject), [_path_glyph(glyph) for glyph in clips]
+    if operation == "union":
+        union([subject_path, *clip_paths], PathPen(out))
+    else:
+        intersection([subject_path], clip_paths, PathPen(out))
+    pen = TTGlyphPen(None)
+    out.draw(pen)
+    glyph = pen.glyph()
+    points, ends, flags = glyph.getCoordinates(None)
+    glyph.coordinates = GlyphCoordinates([(round(x), round(y)) for x, y in points])
+    glyph.endPtsOfContours, glyph.flags = ends, flags
+    return glyph
+
+
+def _rectangle_glyph(rectangles: Iterable[tuple[int, int, int, int]]) -> Any:
+    pen = TTGlyphPen(None)
+    for x0, y0, x1, y1 in rectangles:
+        pen.moveTo((x0, y0))
+        pen.lineTo((x1, y0))
+        pen.lineTo((x1, y1))
+        pen.lineTo((x0, y1))
+        pen.closePath()
+    return pen.glyph()
+
+
+def _make_neovim_glyphs(
+    target: TTFont,
+    cyroit: TTFont,
+    scratch_font: TTFont,
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+    italic: bool,
+    bold: bool,
+) -> None:
+    """Install the 43 Ubuntu-derived Neovim symbols and Cyroit check mark."""
+    edited = {0x42, 0x44, 0x50, 0x52, 0x69, 0x72}
+    scratch: dict[int, Any] = {}
+    for cp in sorted(set(NEOVIM_GLYPHS.values())):
+        scratch[cp] = _scratch_glyph(scratch_font, cp, 10 if cp in edited else 0)
+    # Reproduce the small source edits used by Ubroit's generator before sups.
+    macron = _transform_glyph(_scratch_glyph(scratch_font, 0x00AF), (0.50, 0, 0, 1.10, 0, 0))
+    offsets = ((145, -323), (115, -323)) if not bold else ((140, -336), (85, -336))
+    scratch[0x47] = _boolean_glyph(
+        scratch[0x47], (_transform_glyph(macron, (1, 0, 0, 1, x, y)) for x, y in offsets), "union"
+    )
+    block = _scratch_glyph(scratch_font, 0x2588)
+    j_x = 170 if not bold else 150
+    j_mask = _boolean_glyph(
+        _transform_glyph(block, (1, 0, 0, 1, j_x, 0)),
+        (_transform_glyph(block, (1, 0, 0, 1, 0, -450)), _transform_glyph(block, (1, 0, 0, 1, 0, 810))),
+        "union",
+    )
+    scratch[0x4A] = _boolean_glyph(scratch[0x4A], (j_mask,), "intersection")
+    m_block = _transform_glyph(block, (0.25, 0, 0, 0.20, 256 * 0.75, 338 * 0.80 - 160))
+    m_fragment = _boolean_glyph(scratch[0x6D], (m_block,), "intersection")
+    scratch[0x6D] = _boolean_glyph(scratch[0x6D], (_transform_glyph(m_fragment, (1, 0, 0, 1, 0, -80)),), "union")
+    # Stored V remains the original V, and stored D is the +10-X form without its bar.
+    scratch[0x56] = _scratch_glyph(scratch_font, 0x56)
+    # The source generator widens hyphen-minus before making its superscript.
+    for cp, factor in ((0x2D, 1.25 if bold else 1.50),):
+        recording, pen = DecomposingRecordingPen({"scratch": scratch[cp]}), TTGlyphPen(None)
+        scratch[cp].draw(recording, None)
+        recording.replay(TransformPen(pen, (factor, 0, 0, 1, 256 * (1 - factor), 0)))
+        scratch[cp] = pen.glyph()
+    for target_cp, base_cp in NEOVIM_GLYPHS.items():
+        glyph = _superscript_glyph(scratch[base_cp], 10 if target_cp == 0x207B else 0)
+        if italic:
+            glyph = _boolean_glyph(_transform_glyph(glyph, (1, 0, 0.16, 1, -48, 0)), (), "union")
+        cmap.pop(target_cp, None)
+        _set_mapped_glyph(target, cmap, target_cp, glyph, "generated")
+        origins[target_cp] = "generated"
+
+    source_cmap, source_set = cyroit.getBestCmap(), cyroit.getGlyphSet()
+    source_name = source_cmap.get(NEOVIM_CHECK)
+    if source_name is None:
+        raise ValueError("Cyroit source lacks U+2714")
+    recording, pen = DecomposingRecordingPen(source_set), TTGlyphPen(None)
+    source_set[source_name].draw(recording)
+    recording.replay(pen)
+    cmap.pop(NEOVIM_CHECK, None)
+    _set_mapped_glyph(target, cmap, NEOVIM_CHECK, pen.glyph(), "cyroit")
+    origins[NEOVIM_CHECK] = "cyroit"
 
 
 def _shorten_left_arrow_point(
@@ -815,6 +995,10 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
             source: stack.enter_context(closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)))
             for source, path in files.items()
         }
+        scratch_path = roots["ubuntu"] / f"UbuntuMono-{'B' if 'Bold' in style else 'R'}.ttf"
+        scratch_font = stack.enter_context(closing(TTFont(scratch_path, recalcBBoxes=False, recalcTimestamp=False)))
+        if scratch_font["head"].unitsPerEm != UPM:
+            scale_upem(scratch_font, UPM)
         target = fonts["ubuntu"]
         if target["head"].unitsPerEm != UPM:
             scale_upem(target, UPM)
@@ -827,6 +1011,15 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         mapping[RETURN_SYMBOL_CODEPOINT] = mapping[RETURN_ARROW_CODEPOINT]
         origins[RETURN_SYMBOL_CODEPOINT] = "cyroit"
         uvs = remap_uvs(fonts["cyroit"], copier, origins)
+        _make_neovim_glyphs(
+            target,
+            fonts["cyroit"],
+            scratch_font,
+            mapping,
+            origins,
+            "Italic" in style,
+            "Bold" in style,
+        )
         add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
         add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
         replace_box_drawing(target, fonts["cyroit"], mapping, origins)
@@ -861,6 +1054,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
             f"U+{cp:04X}": origins.get(cp)
             for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
         },
+        "neovim_origins": {f"U+{cp:04X}": origins[cp] for cp in (*NEOVIM_GLYPHS, NEOVIM_CHECK)},
     }
     print(f"wrote    {output.name}: {len(mapping):,} codepoints, IBM fallback {counts['ibm']:,}, UVS {uvs_count:,}")
     return summary

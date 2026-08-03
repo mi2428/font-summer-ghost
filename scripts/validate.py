@@ -29,6 +29,57 @@ EXPECTED_ORIGINS = {
     "U+FF11": "biz",
     "U+3405": "ibm",
 }
+NEOVIM_GLYPHS = {
+    0x02B3,
+    0x02B8,
+    0x02E2,
+    0x02E3,
+    0x1D2C,
+    0x1D2E,
+    0x1D30,
+    0x1D31,
+    0x1D33,
+    0x1D34,
+    0x1D35,
+    0x1D36,
+    0x1D37,
+    0x1D38,
+    0x1D39,
+    0x1D3A,
+    0x1D3C,
+    0x1D3E,
+    0x1D3F,
+    0x1D40,
+    0x1D41,
+    0x1D42,
+    0x1D43,
+    0x1D47,
+    0x1D48,
+    0x1D49,
+    0x1D4D,
+    0x1D4F,
+    0x1D50,
+    0x1D52,
+    0x1D56,
+    0x1D57,
+    0x1D58,
+    0x1D5B,
+    0x1D9C,
+    0x1DA0,
+    0x1DBB,
+    0x2071,
+    0x207B,
+    0x207D,
+    0x207E,
+    0x207F,
+    0x2C7D,
+}
+NEOVIM_REPRESENTATIVE_BOUNDS = {
+    "Regular": {0x1D36: (84, 218, 405, 700), 0x1D50: (72, 227, 444, 589), 0x207B: (111, 402, 402, 461)},
+    "Bold": {0x1D36: (73, 218, 422, 700), 0x1D50: (62, 227, 450, 590), 0x207B: (106, 388, 406, 480)},
+    "Italic": {0x1D36: (77, 218, 469, 700), 0x1D50: (60, 227, 477, 589), 0x207B: (127, 402, 428, 461)},
+    "BoldItalic": {0x1D36: (66, 218, 486, 700), 0x1D50: (50, 227, 479, 590), 0x207B: (120, 388, 435, 480)},
+}
 REQUIRED = {
     0x0041: "Ubuntu Mono Latin",
     0x21B5: "Neovim return arrow",
@@ -417,6 +468,14 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
         missing = [f"{description} U+{cp:04X}" for cp, description in REQUIRED.items() if cp not in cmap]
         if missing:
             raise AssertionError(f"{path.name} lacks: {', '.join(missing)}")
+        neovim = NEOVIM_GLYPHS | {0x2714}
+        for cp in neovim:
+            glyph_name = cmap[cp]
+            expect(font["hmtx"].metrics[glyph_name][0], 512, f"{path.name} U+{cp:04X} Neovim advance")
+            if _bounds(font, glyph_name) == (0, 0, 0, 0):
+                raise AssertionError(f"{path.name} U+{cp:04X} Neovim glyph is empty")
+        for cp, expected_bounds in NEOVIM_REPRESENTATIVE_BOUNDS[style].items():
+            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} representative bounds")
         if len(cmap) < 15_000:
             raise AssertionError(f"{path.name} maps only {len(cmap)} Unicode codepoints")
         return_glyphs = tuple(cmap[codepoint] for codepoint in RETURN_MARKS)
@@ -738,9 +797,34 @@ def main() -> None:
         counts = summary.get("codepoints")
         if not isinstance(counts, dict) or counts.get("ibm", 0) < 1_000:
             raise AssertionError(f"{style} has insufficient IBM fallback coverage")
-        expect(counts.get("generated"), 31, f"{style} generated terminal geometry")
+        expect(counts.get("generated"), 74, f"{style} generated terminal geometry and Neovim glyphs")
+        neovim_origins = summary.get("neovim_origins", {})
+        if not isinstance(neovim_origins, dict):
+            raise AssertionError(f"{style} Neovim provenance is not an object")
+        expect(
+            set(neovim_origins),
+            {f"U+{cp:04X}" for cp in NEOVIM_GLYPHS | {0x2714}},
+            f"{style} Neovim provenance coverage",
+        )
+        expect(
+            {key: neovim_origins[key] for key in neovim_origins if key != "U+2714"},
+            {f"U+{cp:04X}": "generated" for cp in NEOVIM_GLYPHS},
+            f"{style} generated Neovim provenance",
+        )
+        expect(neovim_origins.get("U+2714"), "cyroit", f"{style} check-mark provenance")
         expect(sum(counts.values()), summary.get("total_codepoints"), f"{style} source counts")
         expect(summary.get("size_bytes"), path.stat().st_size, f"{style} artifact size")
+    with (
+        closing(TTFont(DIST / "SummerGhost-Regular.ttf", recalcBBoxes=False, recalcTimestamp=False)) as regular,
+        closing(TTFont(DIST / "SummerGhost-Italic.ttf", recalcBBoxes=False, recalcTimestamp=False)) as italic,
+        closing(TTFont(DIST / "SummerGhost-Bold.ttf", recalcBBoxes=False, recalcTimestamp=False)) as bold,
+        closing(TTFont(DIST / "SummerGhost-BoldItalic.ttf", recalcBBoxes=False, recalcTimestamp=False)) as bold_italic,
+    ):
+        for left, right, label in ((regular, italic, "Regular/Italic"), (bold, bold_italic, "Bold/BoldItalic")):
+            left_name, right_name = left.getBestCmap()[0x2714], right.getBestCmap()[0x2714]
+            left_points = list(left["glyf"][left_name].getCoordinates(left["glyf"])[0])
+            right_points = list(right["glyf"][right_name].getCoordinates(right["glyf"])[0])
+            expect(left_points, right_points, f"U+2714 upright {label}")
     expect(enclosed_bounds["Regular"], enclosed_bounds["Italic"], "regular circled-digit geometry")
     expect(enclosed_bounds["Bold"], enclosed_bounds["BoldItalic"], "bold circled-digit geometry")
     if enclosed_bounds["Regular"] == enclosed_bounds["Bold"]:
