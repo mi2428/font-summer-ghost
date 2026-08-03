@@ -256,12 +256,12 @@ def read_sources() -> Sources:
     if any(origins.get(codepoint) != source for codepoint, source in expected.items()):
         raise ValueError(f"provenance anchors changed: {origins}")
     ubuntu_asset = _asset_name(document, "ubuntu-font-family-")
-    cyroit_asset = _asset_name(document, "Cyroit-Regular")
+    cyroit_asset = _asset_name(document, "Cyroit_v3.11.0")
     biz_asset = _asset_name(document, "BIZUDGothic-")
     ibm_asset = _asset_name(document, "IBMPlexSansJP-Regular")
     return Sources(
         ubuntu=f"{ubuntu_asset.removesuffix('.zip').upper()} / ASCII SOURCE",
-        cyroit=f"{cyroit_asset.removesuffix('.nopatch.ttf').upper()} / SCALE {scales['cyroit']:.2f}",
+        cyroit=f"{cyroit_asset.removesuffix('.zip').upper()} / SCALE {scales['cyroit']:.2f}",
         biz=f"{biz_asset.removesuffix('.zip').upper()} / SCALE {scales['biz']:.2f}",
         ibm=(
             f"{ibm_asset.removesuffix('.ttf').upper()} / {str(document['ibm_commit'])[:8]} / SCALE {scales['ibm']:.2f}"

@@ -66,6 +66,7 @@ GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
 )
 EVERYDAY_CELL_FIT_SYMBOLS = frozenset({0x203B, 0x2103, 0x2109, 0x2600, 0x2601, 0x2602, 0x260E, 0x266A, 0x266F, 0x2713})
 CYROIT_BOX_BOUNDS = (-89, -420, 601, 1014)
+CYROIT_LEGACY_CENTERING_ADVANCE = {0x29FCE: 1145, 0x29FD7: 1145}
 IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 SOURCE_ORDER = ("ubuntu", "cyroit", "biz", "ibm")
 PROVENANCE_ORIGINS = (*SOURCE_ORDER, "generated")
@@ -108,14 +109,9 @@ ASSETS: tuple[Asset, ...] = (
         "61a2b342526fd552f19fef438bb9211a8212de19ad96e32a1209c039f1d68ecf",
     ),
     Asset(
-        "Cyroit-Regular.nopatch.ttf",
-        "https://raw.githubusercontent.com/omonomo/Ubroit/v1.8.0/sourceFonts/Cyroit.nopatch/Cyroit-Regular.nopatch.ttf",
-        "cdd13dff9df6785860d22fe5f8ec71d1bc9ebe1913d18b68c529d19404090974",
-    ),
-    Asset(
-        "Cyroit-Bold.nopatch.ttf",
-        "https://raw.githubusercontent.com/omonomo/Ubroit/v1.8.0/sourceFonts/Cyroit.nopatch/Cyroit-Bold.nopatch.ttf",
-        "4feff623bc4d4fc1e09f9cdc7bfcbc8b320c732a3ce76b27ef9a9279c6532e08",
+        "Cyroit_v3.11.0.zip",
+        "https://github.com/omonomo/Cyroit/releases/download/v3.11.0/Cyroit_v3.11.0.zip",
+        "88d92d9bc972783bb1467188e17ffe4b63fcaffd1c2d5d183dfe1337ebafaa81",
     ),
     Asset(
         "BIZUDGothic-1.051.zip",
@@ -144,7 +140,7 @@ STYLE_PARTS = {
 STYLES: Mapping[str, tuple[str, str, str, str]] = {
     style: (
         f"UbuntuMono-{ubuntu}.ttf",
-        f"Cyroit-{weight}.nopatch.ttf",
+        f"BS/CyroitBS-{weight}.ttf",
         f"BIZUDGothic-{weight}.ttf",
         f"IBMPlexSansJP-{weight}.ttf",
     )
@@ -199,6 +195,7 @@ def fetch_sources() -> Mapping[str, Path]:
         extracted.mkdir(parents=True)
         for archive, directory in (
             ("ubuntu-font-family-0.83.zip", "ubuntu"),
+            ("Cyroit_v3.11.0.zip", "cyroit"),
             ("BIZUDGothic-1.051.zip", "biz"),
         ):
             with zipfile.ZipFile(DOWNLOADS / archive) as bundle:
@@ -206,7 +203,7 @@ def fetch_sources() -> Mapping[str, Path]:
         (extracted / ".complete").touch()
     return {
         "ubuntu": extracted / "ubuntu" / "ubuntu-font-family-0.83",
-        "cyroit": DOWNLOADS,
+        "cyroit": extracted / "cyroit",
         "biz": extracted / "biz",
         "ibm": DOWNLOADS,
     }
@@ -579,7 +576,17 @@ class GlyphCopier:
         recording, pen = DecomposingRecordingPen(self.glyphs), TTGlyphPen(None)
         self.glyphs[source_name].draw(recording)
         if arrow_points_left is None:
-            offset = 0.0 if width == 0 else (width - self.metrics[source_name][0] * factor) / 2
+            source_advance = self.metrics[source_name][0]
+            if self.prefix == SOURCE_PREFIXES["cyroit"]:
+                source_advance = next(
+                    (
+                        legacy
+                        for cp, legacy in CYROIT_LEGACY_CENTERING_ADVANCE.items()
+                        if self.cmap.get(cp) == source_name
+                    ),
+                    source_advance,
+                )
+            offset = 0.0 if width == 0 else (width - source_advance * factor) / 2
             recording.replay(TransformPen(pen, (factor, 0, 0, factor, offset, 0)))
         else:
             bounds_pen = BoundsPen(self.glyphs)
