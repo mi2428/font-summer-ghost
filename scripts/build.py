@@ -90,6 +90,12 @@ if len(ORPHAN_CODEPOINTS) != 87:
 SOURCE_ORDER = ("ubuntu", "mplus1p", "ninjal", "biz", "ibm")
 PROVENANCE_ORIGINS = (*SOURCE_ORDER, "generated")
 SOURCE_SCALES = {"mplus1p": 1.0, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90}
+MPLUS1P_STYLE_SCALES = {
+    "Regular": 0.91,
+    "Italic": 0.91,
+    "Bold": 0.90,
+    "BoldItalic": 0.90,
+}
 SOURCE_PREFIXES = {"mplus1p": "m", "biz": "b", "ninjal": "n", "ibm": "i"}
 JAPANESE_RANGES = (
     (0x2E80, 0x2FFF),
@@ -1060,9 +1066,10 @@ def add_codepoints(
     origins: MutableMapping[int, str],
     origin: str,
     accepts: Callable[[int], bool],
+    scale: float,
 ) -> GlyphCopier:
     """Append eligible, previously unmapped source glyphs."""
-    copier = GlyphCopier(target, source, SOURCE_PREFIXES[origin], SOURCE_SCALES[origin])
+    copier = GlyphCopier(target, source, SOURCE_PREFIXES[origin], scale)
     for codepoint in sorted(source.getBestCmap()):
         if (
             codepoint not in cmap
@@ -1242,6 +1249,7 @@ def set_metadata(font: TTFont, style: str, mapping: Mapping[int, str]) -> None:
 
 def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
     """Build one style and return its machine-readable provenance."""
+    scales = {**SOURCE_SCALES, "mplus1p": MPLUS1P_STYLE_SCALES[style]}
     files = {source: roots[source] / name for source, name in zip(SOURCE_ORDER, STYLES[style], strict=True)}
     missing = [f"{source}: {path}" for source, path in files.items() if not path.is_file()]
     if missing:
@@ -1266,11 +1274,27 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
             if not is_private_use(cp) and cp not in ORPHAN_CODEPOINTS
         }
         origins = dict.fromkeys(mapping, "ubuntu")
-        add_codepoints(target, fonts["mplus1p"], mapping, origins, "mplus1p", is_mplus1p_japanese)
-        add_codepoints(target, fonts["ninjal"], mapping, origins, "ninjal", is_ninjal_hentaigana)
-        biz_copier = add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True)
+        add_codepoints(
+            target,
+            fonts["mplus1p"],
+            mapping,
+            origins,
+            "mplus1p",
+            is_mplus1p_japanese,
+            scales["mplus1p"],
+        )
+        add_codepoints(
+            target,
+            fonts["ninjal"],
+            mapping,
+            origins,
+            "ninjal",
+            is_ninjal_hentaigana,
+            scales["ninjal"],
+        )
+        biz_copier = add_codepoints(target, fonts["biz"], mapping, origins, "biz", lambda _: True, scales["biz"])
         uvs = remap_biz_uvs(fonts["biz"], biz_copier)
-        add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True)
+        add_codepoints(target, fonts["ibm"], mapping, origins, "ibm", lambda _: True, scales["ibm"])
         _make_neovim_glyphs(
             target,
             scratch_font,
@@ -1312,7 +1336,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         "uvs_mappings_from_biz": uvs_count,
         "glyphs": glyph_count,
         "size_bytes": output.stat().st_size,
-        "scales": SOURCE_SCALES,
+        "scales": scales,
         "sample_origins": {
             f"U+{cp:04X}": origins.get(cp)
             for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)

@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
+from statistics import median
 from typing import Any, TypeVar
 
 import uharfbuzz as hb
@@ -170,8 +171,8 @@ ENCLOSED_DIGIT_ASPECT_RANGE = (0.74, 0.75)
 ENCLOSED_DIGIT_INNER_BOUNDS = {False: (-37, -44, 549, 745), True: (-32, -37, 544, 737)}
 ENCLOSED_DIGIT_NUMERAL_CONTOURS = (1, 1, 1, 2, 1, 2, 1, 3, 2, 3, 2, 2, 2, 3, 2, 3, 2, 4, 3, 3)
 PLAIN_CIRCLE_BOUNDS = {
-    False: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (69, -75, 955, 812)},
-    True: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (54, -89, 970, 826)},
+    False: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (109, -68, 915, 739)},
+    True: {0x25CB: (6, 89, 506, 589), 0x25CF: (6, 89, 506, 589), 0x3007: (100, -80, 924, 744)},
 }
 GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
     {
@@ -281,8 +282,85 @@ BLOCK_RECTANGLES = {
     0x259F: ((0, -174, 512, 338), (256, 338, 512, 850)),
 }
 INK_HEIGHTS = {
-    False: {0x0041: 0.638, 0x3042: 0.866, 0x65E5: 0.760, 0x8A9E: 0.791},
-    True: {0x0041: 0.638, 0x3042: 0.884, 0x65E5: 0.764, 0x8A9E: 0.795},
+    False: {0x0041: 0.638, 0x3042: 0.788, 0x65E5: 0.760, 0x8A9E: 0.791},
+    True: {0x0041: 0.638, 0x3042: 0.796, 0x65E5: 0.764, 0x8A9E: 0.795},
+}
+EXPECTED_SCALES = {
+    "Regular": {"mplus1p": 0.91, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90},
+    "Italic": {"mplus1p": 0.91, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90},
+    "Bold": {"mplus1p": 0.90, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90},
+    "BoldItalic": {"mplus1p": 0.90, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90},
+}
+ORDINARY_KANA_CODEPOINTS = tuple(range(0x3041, 0x3097)) + tuple(range(0x30A1, 0x30FB))
+MPLUS_AUDITED_CODEPOINTS = (0x3042, 0x3093, 0x30A2, 0x30F3, 0x3001, 0x3002)
+ORDINARY_KANA_DISTRIBUTION = {
+    False: {"count": 176, "width_range": (545, 899), "height_range": (480, 863), "median": (776, 761)},
+    True: {"count": 176, "width_range": (555, 892), "height_range": (518, 860), "median": (786.5, 768.5)},
+}
+MPLUS_REPRESENTATIVE_BOUNDS = {
+    False: {
+        0x3042: (136, -59, 888, 748),
+        0x3093: (121, -43, 913, 726),
+        0x30A2: (160, -31, 896, 664),
+        0x30F3: (183, -9, 903, 679),
+        0x3001: (100, -55, 343, 195),
+        0x3002: (103, -74, 389, 212),
+    },
+    True: {
+        0x3042: (128, -71, 896, 744),
+        0x3093: (116, -53, 918, 733),
+        0x30A2: (155, -42, 902, 670),
+        0x30F3: (169, -18, 908, 691),
+        0x3001: (104, -69, 371, 207),
+        0x3002: (98, -82, 400, 219),
+    },
+}
+AUDITED_NON_MPLUS_ORIGINS = {
+    0x65E5: "biz",
+    0x3405: "ibm",
+    0x1B001: "ninjal",
+    0xFF76: "biz",
+    0x0041: "ubuntu",
+    0x2190: "generated",
+    0x2500: "generated",
+}
+AUDITED_NON_MPLUS_BOUNDS = {
+    "Regular": {
+        0x65E5: (186, -67, 836, 711),
+        0x3405: (154, -13, 832, 764),
+        0x1B001: (135, 0, 867, 793),
+        0xFF76: (55, -18, 430, 716),
+        0x0041: (9, 0, 503, 653),
+        0x2190: (44, 310, 468, 404),
+        0x2500: (0, 295, 512, 381),
+    },
+    "Italic": {
+        0x65E5: (186, -67, 836, 711),
+        0x3405: (154, -13, 832, 764),
+        0x1B001: (135, 0, 867, 793),
+        0xFF76: (55, -18, 430, 716),
+        0x0041: (-13, 0, 480, 653),
+        0x2190: (44, 310, 468, 404),
+        0x2500: (0, 295, 512, 381),
+    },
+    "Bold": {
+        0x65E5: (176, -68, 849, 714),
+        0x3405: (138, -25, 864, 780),
+        0x1B001: (135, 0, 867, 793),
+        0xFF76: (46, -35, 438, 724),
+        0x0041: (9, 0, 503, 653),
+        0x2190: (44, 302, 468, 413),
+        0x2500: (0, 282, 512, 394),
+    },
+    "BoldItalic": {
+        0x65E5: (176, -68, 849, 714),
+        0x3405: (138, -25, 864, 780),
+        0x1B001: (135, 0, 867, 793),
+        0xFF76: (46, -35, 438, 724),
+        0x0041: (-6, 0, 487, 653),
+        0x2190: (44, 302, 468, 413),
+        0x2500: (0, 282, 512, 394),
+    },
 }
 T = TypeVar("T")
 Contour = list[tuple[str, tuple[Any, ...]]]
@@ -341,6 +419,16 @@ def validate_ownership(summary: Mapping[str, object], style: str, cmap: Mapping[
     expect(set(owners), mapped, f"{style} ownership/cmap coverage")
     expect(mapped & ORPHAN_CODEPOINTS, set(), f"{style} approved orphan removals")
     expect(
+        {cp for cp in ORDINARY_KANA_CODEPOINTS if owners.get(cp) != "mplus1p"},
+        set(),
+        f"{style} ordinary kana M PLUS ownership",
+    )
+    expect(
+        {cp for cp in MPLUS_AUDITED_CODEPOINTS if owners.get(cp) != "mplus1p"},
+        set(),
+        f"{style} audited M PLUS ownership",
+    )
+    expect(
         {cp for cp, origin in owners.items() if origin == "ninjal"},
         set(NINJAL_CODEPOINTS),
         f"{style} direct NINJAL coverage",
@@ -386,6 +474,43 @@ def _bounds(font: TTFont, glyph_name: str) -> tuple[int, int, int, int]:
     glyph = font["glyf"][glyph_name]
     glyph.recalcBounds(font["glyf"])
     return glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax
+
+
+def validate_mplus_optical_balance(font: TTFont, style: str) -> None:
+    """Lock the final M PLUS kana distribution and representative outline bounds."""
+    cmap = font.getBestCmap()
+    bold = "Bold" in style
+    expected = ORDINARY_KANA_DISTRIBUTION[bold]
+    missing = sorted(set(ORDINARY_KANA_CODEPOINTS) - set(cmap))
+    expect(len(missing), 0, f"{style} ordinary kana coverage")
+    widths, heights = [], []
+    for codepoint in ORDINARY_KANA_CODEPOINTS:
+        x_min, y_min, x_max, y_max = _bounds(font, cmap[codepoint])
+        widths.append(x_max - x_min)
+        heights.append(y_max - y_min)
+    expect(len(widths), expected["count"], f"{style} ordinary kana count")
+    expect((min(widths), max(widths)), expected["width_range"], f"{style} ordinary kana width distribution")
+    expect((min(heights), max(heights)), expected["height_range"], f"{style} ordinary kana height distribution")
+    expect((median(widths), median(heights)), expected["median"], f"{style} ordinary kana bbox median")
+    for codepoint, expected_bounds in MPLUS_REPRESENTATIVE_BOUNDS[bold].items():
+        expect_bounds_with_tolerance(
+            _bounds(font, cmap[codepoint]),
+            expected_bounds,
+            1,
+            f"{style} U+{codepoint:04X} M PLUS representative bounds",
+        )
+
+
+def validate_non_mplus_representatives(font: TTFont, style: str, owners: Mapping[int, str]) -> None:
+    """Ensure non-target layers retain ownership and final outline geometry."""
+    cmap = font.getBestCmap()
+    for codepoint, origin in AUDITED_NON_MPLUS_ORIGINS.items():
+        expect(owners.get(codepoint), origin, f"{style} U+{codepoint:04X} audited ownership")
+        expect(
+            _bounds(font, cmap[codepoint]),
+            AUDITED_NON_MPLUS_BOUNDS[style][codepoint],
+            f"{style} U+{codepoint:04X} audited non-M PLUS bounds",
+        )
 
 
 def _recording_contours(font: TTFont, glyph_name: str) -> list[Contour]:
@@ -593,6 +718,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
         missing_ninjal = sorted(NINJAL_CODEPOINTS - set(cmap))
         if missing_ninjal:
             raise AssertionError(f"{path.name} lacks direct NINJAL coverage: {missing_ninjal}")
+        validate_mplus_optical_balance(font, style)
         neovim = NEOVIM_GLYPHS | {0x2714}
         for cp in neovim:
             glyph_name = cmap[cp]
@@ -740,7 +866,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
                 )
             enclosed_bounds.append(bounds)
         for cp, expected_bounds in PLAIN_CIRCLE_BOUNDS[bold].items():
-            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} unchanged plain circle")
+            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} plain circle bounds")
         fitted_symbols = GEOMETRIC_CELL_FIT_SYMBOLS | EVERYDAY_CELL_FIT_SYMBOLS
         expect(
             GEOMETRIC_CELL_FIT_SYMBOLS & EVERYDAY_CELL_FIT_SYMBOLS,
@@ -951,15 +1077,17 @@ def main() -> None:
         path, summary = DIST / f"SummerGhost-{style}.ttf", summaries[style]
         if not path.is_file():
             raise AssertionError(f"missing {path.name}")
+        expect(summary.get("scales"), EXPECTED_SCALES[style], f"{style} effective source scales")
         enclosed_bounds[style] = validate_font(path, style)
         validate_shaping(path)
         samples = summary.get("sample_origins")
         if not isinstance(samples, Mapping):
             raise AssertionError(f"{style} source precedence is not an object")
-        for codepoint, origin in EXPECTED_ORIGINS.items():
-            expect(samples.get(codepoint), origin, f"{style} source precedence {codepoint}")
+        for sample_codepoint, origin in EXPECTED_ORIGINS.items():
+            expect(samples.get(sample_codepoint), origin, f"{style} source precedence {sample_codepoint}")
         with closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)) as font:
             validate_ownership(summary, style, font.getBestCmap())
+            validate_non_mplus_representatives(font, style, ownership_map(summary, style))
         counts = summary.get("codepoints")
         if not isinstance(counts, dict):
             raise AssertionError(f"{style} source counts must use approved origins")
@@ -991,11 +1119,29 @@ def main() -> None:
         closing(TTFont(DIST / "SummerGhost-Bold.ttf", recalcBBoxes=False, recalcTimestamp=False)) as bold,
         closing(TTFont(DIST / "SummerGhost-BoldItalic.ttf", recalcBBoxes=False, recalcTimestamp=False)) as bold_italic,
     ):
-        for left, right, label in ((regular, italic, "Regular/Italic"), (bold, bold_italic, "Bold/BoldItalic")):
+        for left, right, left_style, right_style, label in (
+            (regular, italic, "Regular", "Italic", "Regular/Italic"),
+            (bold, bold_italic, "Bold", "BoldItalic", "Bold/BoldItalic"),
+        ):
             left_name, right_name = left.getBestCmap()[0x2714], right.getBestCmap()[0x2714]
             left_points = list(left["glyf"][left_name].getCoordinates(left["glyf"])[0])
             right_points = list(right["glyf"][right_name].getCoordinates(right["glyf"])[0])
             expect(left_points, right_points, f"U+2714 upright {label}")
+            left_owners = ownership_map(summaries[left_style], left_style)
+            right_owners = ownership_map(summaries[right_style], right_style)
+            left_mplus = {cp for cp, origin in left_owners.items() if origin == "mplus1p"}
+            right_mplus = {cp for cp, origin in right_owners.items() if origin == "mplus1p"}
+            expect(left_mplus, right_mplus, f"{label} M PLUS ownership set")
+            for audited_codepoint in sorted(left_mplus):
+                left_glyph = left.getBestCmap()[audited_codepoint]
+                right_glyph = right.getBestCmap()[audited_codepoint]
+                left_coordinates = left["glyf"][left_glyph].getCoordinates(left["glyf"])
+                right_coordinates = right["glyf"][right_glyph].getCoordinates(right["glyf"])
+                expect(
+                    (list(left_coordinates[0]), list(left_coordinates[1]), list(left_coordinates[2])),
+                    (list(right_coordinates[0]), list(right_coordinates[1]), list(right_coordinates[2])),
+                    f"U+{audited_codepoint:04X} M PLUS geometry {label}",
+                )
     expect(enclosed_bounds["Regular"], enclosed_bounds["Italic"], "regular circled-digit geometry")
     expect(enclosed_bounds["Bold"], enclosed_bounds["BoldItalic"], "bold circled-digit geometry")
     if enclosed_bounds["Regular"] == enclosed_bounds["Bold"]:
