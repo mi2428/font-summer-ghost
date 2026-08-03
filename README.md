@@ -11,6 +11,7 @@ Latin and Japanese glyphs are balanced instead of being forced into the same bou
 
 - **Grid:** UPM 1024 with 512-unit half-width and 1024-unit full-width cells.
 - **Optical scale:** Ubuntu Mono ASCII is 103% vertically and 100% horizontally; adjusted Cyroit Japanese remains at 100%; direct BIZ UDGothic and IBM Plex Sans JP fallbacks are scaled to 87% and 90%, respectively.
+- **Neovim fallback coverage:** 43 superscript/modifier symbols are generated from unscaled Ubuntu Mono scratch outlines (including the documented G/J/m edits and weight-specific hyphen width), with U+2714 copied upright from Cyroit in every style.
 - **Line metrics:** Ascent 850, descent 174, and line gap 0 produce an exact 1-em line height while keeping Latin, kana, and kanji visually aligned.
 - **Terminal symbols:** U+2460–U+2473 retain the complete IBM Plex Sans JP outlines with PlemolJP Console's familiar 67%-horizontal/90%-vertical enclosed-number proportions, recentered on the half-width cell. Basic arrows, the exact-mirror ⇐/⇒ pair, and an audited set of 24 common geometric, weather, phone, music, and temperature symbols stay inside that cell so Ghostty does not rescale them when neighboring cells change. U+21B5 `↵` and fish's U+23CE `⏎` intentionally share Cyroit's return-arrow outline, keeping Neovim end-of-line markers and fish's omitted-newline marker visually consistent.
 - **Terminal geometry:** Cyroit box drawing is grid-fitted across U+2500–U+257F, while solid Block Elements are generated on exact half-, quarter-, and eighth-cell boundaries. Ghostty 1.3.1 renders U+2500–U+259F with internal sprites by default; the font's own outlines are available through the optional override below.
@@ -26,34 +27,33 @@ Latin and Japanese glyphs are balanced instead of being forced into the same bou
 
 ## Installation
 
-[uv](https://docs.astral.sh/uv/) is required. The first build downloads pinned upstream assets and verifies their SHA-256 digests.
+[uv](https://docs.astral.sh/uv/) is required. The first build downloads pinned upstream assets and verifies their SHA-256 digests; Cyroit symbols use the official `BS/CyroitBS-Regular.ttf` and `BS/CyroitBS-Bold.ttf` release inputs.
 
 ```console
 $ make install
 
 download https://assets.ubuntu.com/v1/0cef8205-ubuntu-font-family-0.83.zip
-download https://raw.githubusercontent.com/omonomo/Ubroit/v1.8.0/sourceFonts/Cyroit.nopatch/Cyroit-Regular.nopatch.ttf
-download https://raw.githubusercontent.com/omonomo/Ubroit/v1.8.0/sourceFonts/Cyroit.nopatch/Cyroit-Bold.nopatch.ttf
+download https://github.com/omonomo/Cyroit/releases/download/v3.11.0/Cyroit_v3.11.0.zip
 download https://github.com/googlefonts/morisawa-biz-ud-gothic/releases/download/v1.051/BIZUDGothic.zip
 download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf
 download https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf
 
 === Regular ===
-wrote    SummerGhost-Regular.ttf: 16,714 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Regular.ttf: 16,758 codepoints, IBM fallback 3,637, UVS 10,160
 
 === Bold ===
-wrote    SummerGhost-Bold.ttf: 16,714 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Bold.ttf: 16,758 codepoints, IBM fallback 3,637, UVS 10,160
 
 === Italic ===
-wrote    SummerGhost-Italic.ttf: 16,714 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-Italic.ttf: 16,758 codepoints, IBM fallback 3,637, UVS 10,160
 
 === BoldItalic ===
-wrote    SummerGhost-BoldItalic.ttf: 16,714 codepoints, IBM fallback 3,637, UVS 9,689
+wrote    SummerGhost-BoldItalic.ttf: 16,758 codepoints, IBM fallback 3,637, UVS 10,160
 wrote    dist/provenance.json
-ok       SummerGhost-Regular.ttf: 16,714 codepoints, 16,811 glyphs, 6 selectors
-ok       SummerGhost-Bold.ttf: 16,714 codepoints, 16,811 glyphs, 6 selectors
-ok       SummerGhost-Italic.ttf: 16,714 codepoints, 16,816 glyphs, 6 selectors
-ok       SummerGhost-BoldItalic.ttf: 16,714 codepoints, 16,816 glyphs, 6 selectors
+ok       SummerGhost-Regular.ttf: 16,758 codepoints, 17,164 glyphs, 8 selectors
+ok       SummerGhost-Bold.ttf: 16,758 codepoints, 17,164 glyphs, 8 selectors
+ok       SummerGhost-Italic.ttf: 16,758 codepoints, 17,169 glyphs, 8 selectors
+ok       SummerGhost-BoldItalic.ttf: 16,758 codepoints, 17,169 glyphs, 8 selectors
 validated Summer Ghost Regular/Bold/Italic/BoldItalic
 Installed Summer Ghost into ~/Library/Fonts
 ```

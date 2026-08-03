@@ -123,6 +123,9 @@ IBM_ROWS = (
 )
 
 TERMINAL_ROWS = (
+    Row("NEOVIM MODIFIERS A", "ʳ ʸ ˢ ˣ ᴬ ᴮ ᴰ ᴱ ᴳ ᴴ ᴵ ᴶ ᴷ ᴸ ᴹ"),
+    Row("NEOVIM MODIFIERS B", "ᴺ ᴼ ᴾ ᴿ ᵀ ᵁ ᵂ ᵃ ᵇ ᵈ ᵉ ᵍ ᵏ ᵐ ᵒ"),
+    Row("NEOVIM SYMBOLS", "ᵖ ᵗ ᵘ ᵛ ᶜ ᶠ ᶻ ⁱ ⁻ ⁽ ⁾ ⁿ ⱽ ✔"),
     Row("ENCLOSED 01–10", "① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩"),
     Row("ENCLOSED 11–20", "⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳"),
     Row("GEOMETRIC I", "○ 〇 ◯ ● ◉ ◎ ◌ ◊"),
@@ -668,9 +671,9 @@ def draw_terminal(canvas: Canvas) -> None:
             (box[0] + PANEL_PAD, 790),
             TERMINAL_ROWS,
             label_width=112,
-            step=21,
-            size=14,
-            label_size=8,
+            step=17,
+            size=12,
+            label_size=7,
         )
 
 
