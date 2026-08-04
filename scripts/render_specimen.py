@@ -116,6 +116,7 @@ BIZ_ROWS = (
     Row("PUNCT", "‐ ‖ ‼ ‾ ‿ ⁂ ⁇ ⁈ ⁉ ⁑"),
     Row("NUMERALS", "Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ ⅳ ⅴ ⅵ ⅶ ⅷ"),
 )
+NINJAL_ROWS = (Row("HENTAIGANA", "𛀁 𛀑 𛀡 𛀱 𛁁 𛁑 𛁡 𛁱 𛂁 𛂑 𛂡 𛂱 𛃁 𛃑 𛃡 𛃱 𛄁 𛄑 𛄞"),)
 IBM_ROWS = (
     Row("EXTENSION A", "㐅㐧㒈㔾㗞㘔㢡㢭㦤㦸"),
     Row("SUPPLEMENTARY", "𠂊𠂰𠃵𠅘𠔿𠖱𠘑𠛬"),
@@ -333,7 +334,7 @@ def validate_fallback_samples() -> None:
         raise ValueError(f"unsupported provenance origins: {unknown}")
     with TTFont(BytesIO(font_data("Regular")), lazy=True) as generated:
         cmap = generated.getBestCmap()
-    for expected_source, sample_rows in (("biz", BIZ_ROWS), ("ibm", IBM_ROWS)):
+    for expected_source, sample_rows in (("biz", BIZ_ROWS), ("ninjal", NINJAL_ROWS), ("ibm", IBM_ROWS)):
         for row in sample_rows:
             codepoints = [ord(character) for character in row.sample if not character.isspace()]
             wrong_origins = [
@@ -524,17 +525,18 @@ def draw_japanese(canvas: Canvas, sources: Sources) -> None:
 
 
 def draw_fallbacks(canvas: Canvas, sources: Sources) -> None:
-    """Draw provenance-verified BIZ and IBM fallback-only specimens."""
+    """Draw provenance-verified BIZ, NINJAL, and IBM source specimens."""
     box = (column_x(0), 720, column_x(0) + span(4), 1028)
     panel(canvas, box, "05", "FALLBACK SOURCE ATLAS", GREEN, "SOURCE-SPECIFIC COVERAGE")
     with canvas.within(box):
         canvas.text((box[0] + PANEL_PAD, 791), sources.biz, face=font("Bold", 9), fill=GREEN, anchor="ls")
-        rows(canvas, (box[0] + PANEL_PAD, 817), BIZ_ROWS, label_width=112, step=22, size=15, label_size=9)
-        canvas.line((box[0] + PANEL_PAD, 880, box[2] - PANEL_PAD, 880))
-        canvas.text((box[0] + PANEL_PAD, 897), sources.ninjal, face=font("Bold", 9), fill=CORAL, anchor="ls")
-        canvas.line((box[0] + PANEL_PAD, 910, box[2] - PANEL_PAD, 910))
-        canvas.text((box[0] + PANEL_PAD, 927), sources.ibm, face=font("Bold", 9), fill=AMBER, anchor="ls")
-        rows(canvas, (box[0] + PANEL_PAD, 951), IBM_ROWS, label_width=112, step=21, size=15, label_size=9)
+        rows(canvas, (box[0] + PANEL_PAD, 814), BIZ_ROWS, label_width=112, step=20, size=15, label_size=9)
+        canvas.line((box[0] + PANEL_PAD, 869, box[2] - PANEL_PAD, 869))
+        canvas.text((box[0] + PANEL_PAD, 886), sources.ninjal, face=font("Bold", 9), fill=CORAL, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 908), NINJAL_ROWS, label_width=112, step=18, size=15, label_size=9)
+        canvas.line((box[0] + PANEL_PAD, 922, box[2] - PANEL_PAD, 922))
+        canvas.text((box[0] + PANEL_PAD, 939), sources.ibm, face=font("Bold", 9), fill=AMBER, anchor="ls")
+        rows(canvas, (box[0] + PANEL_PAD, 960), IBM_ROWS, label_width=112, step=18, size=15, label_size=9)
 
 
 def draw_code(canvas: Canvas) -> None:
