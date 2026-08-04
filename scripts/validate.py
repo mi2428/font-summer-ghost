@@ -81,6 +81,7 @@ EXPECTED_ORIGINS = {
     "U+21B5": "generated",
     "U+23CE": "generated",
     "U+2500": "generated",
+    "U+2731": "generated",
     "U+3042": "mplus1p",
     "U+65E5": "biz",
     "U+FF11": "biz",
@@ -138,6 +139,7 @@ REQUIRED = {
     0x23CE: "fish omitted-newline return symbol",
     0x2460: "circled digit one",
     0x2500: "generated box drawing",
+    0x2731: "generated heavy asterisk",
     0x2580: "upper half block",
     0x2590: "right half block",
     0x2596: "quadrant lower-left block",
@@ -159,9 +161,20 @@ WHITE_PARENTHESIS_PAIR = (0x2985, 0x2986)
 FULL_WIDTH_OVERRIDES = frozenset(WHITE_PARENTHESIS_PAIR)
 RETURN_MARKS = (0x21B5, 0x23CE)
 RETURN_MARK_BOUNDS = {False: (-66, 53, 453, 623), True: (-73, 41, 471, 618)}
+HEAVY_ASTERISK_CODEPOINT = 0x2731
+HEAVY_ASTERISK_BOUNDS = {False: (48, 45, 464, 509), True: (40, 40, 472, 514)}
+HEAVY_ASTERISK_CONTOUR_BOUNDS = {
+    False: ((48, 69, 464, 485), (48, 69, 464, 485), (224, 45, 288, 509)),
+    True: ((40, 61, 472, 493), (40, 61, 472, 493), (212, 40, 300, 514)),
+}
+HEAVY_ASTERISK_HASH = {
+    False: "6aa900a082ce94f072ad081d139e7dcb4753b59b4d75a9bca959455ca561d8a3",
+    True: "46132337f1fc1dfec9f99edb05c0417a566d2262d2b1c1e62432d253a998db4d",
+}
 CHECK_MARK_CODEPOINT = 0x2714
 CHECK_MARK_BOUNDS = {False: (35, 163, 499, 717), True: (25, 158, 508, 722)}
 HORIZONTAL_ARROWS = (0x2190, 0x2192)
+HORIZONTAL_ARROW_Y_SHIFT = -63
 VERTICAL_ARROWS = (0x2191, 0x2193)
 BASIC_ARROWS = HORIZONTAL_ARROWS + VERTICAL_ARROWS
 MIRRORED_HORIZONTAL_ARROW_PAIRS = ((0x21D0, 0x21D2),)
@@ -249,18 +262,18 @@ CELL_FIT_HEIGHTS = {
         0x2713: 518,
     },
 }
-UNCHANGED_AUDITED_BOUNDS = {
+AUDITED_BOUNDS = {
     False: {
-        0x2190: (6, 113, 506, 567),
+        0x2190: (6, 50, 506, 504),
         0x2191: (29, 22, 483, 695),
-        0x2192: (6, 113, 506, 567),
+        0x2192: (6, 50, 506, 504),
         0x2193: (29, -15, 483, 659),
         0x25C9: (47, 129, 466, 548),
     },
     True: {
-        0x2190: (6, 107, 506, 574),
+        0x2190: (6, 44, 506, 511),
         0x2191: (22, 14, 490, 701),
-        0x2192: (6, 107, 506, 574),
+        0x2192: (6, 44, 506, 511),
         0x2193: (21, -20, 489, 667),
         0x25C9: (43, 126, 469, 552),
     },
@@ -333,7 +346,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (55, -18, 430, 716),
         0x0041: (9, 0, 503, 653),
-        0x2190: (6, 113, 506, 567),
+        0x2190: (6, 50, 506, 504),
         0x2500: (0, 295, 512, 381),
     },
     "Italic": {
@@ -342,7 +355,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (55, -18, 430, 716),
         0x0041: (-13, 0, 480, 653),
-        0x2190: (6, 113, 506, 567),
+        0x2190: (6, 50, 506, 504),
         0x2500: (0, 295, 512, 381),
     },
     "Bold": {
@@ -351,7 +364,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (46, -35, 438, 724),
         0x0041: (9, 0, 503, 653),
-        0x2190: (6, 107, 506, 574),
+        0x2190: (6, 44, 506, 511),
         0x2500: (0, 282, 512, 394),
     },
     "BoldItalic": {
@@ -360,7 +373,7 @@ AUDITED_NON_MPLUS_BOUNDS = {
         0x1B001: (135, 0, 867, 793),
         0xFF76: (46, -35, 438, 724),
         0x0041: (-6, 0, 487, 653),
-        0x2190: (6, 107, 506, 574),
+        0x2190: (6, 44, 506, 511),
         0x2500: (0, 282, 512, 394),
     },
 }
@@ -441,7 +454,7 @@ def validate_ownership(summary: Mapping[str, object], style: str, cmap: Mapping[
         | set(range(0x2500, 0x2591))
         | set(range(0x2594, 0x25A0))
         | set(NEOVIM_GLYPHS)
-        | {CHECK_MARK_CODEPOINT}
+        | {CHECK_MARK_CODEPOINT, HEAVY_ASTERISK_CODEPOINT}
     )
     expect(
         {cp for cp in generated if cp in owners and owners[cp] != "generated"},
@@ -739,17 +752,17 @@ _LEGACY_ARROW_LSB = {
 }
 _LEGACY_ARROW_HASH = {
     False: {
-        0x2190: "d5de5c36d135e8101d492f1d4318ef8f10b49d8c28b370c0fd0c11536c2e2479",
+        0x2190: "035b40001177a9bb02e7fc452cfd985fe1b713f88340f5c2872c2b08d485c4e0",
         0x2191: "f1f15f7efbb56277204b83e4d9c60e1903e9182b1b87dbfe2938206d2ccafcc3",
-        0x2192: "f65d4803a8149e004067a740b2719663ca7d5166dad6e233bd889dc573bf568b",
+        0x2192: "add1ea21605f6b022218d77ca4579481a06232de585e727bbaafdec9c3ed6a0b",
         0x2193: "2e93e9e4bbb5900cc5ed500de92d9c619fcc38959bf2c4cabdc78d9421f8d212",
         0x21D0: "dbbfc9b3236e006e23fe6c74de08470d5e707abd89435522a08bc6b520f42dbf",
         0x21D2: "ec36bc2838a6060804c5e8535716f9781f1d528fd3e174350c61933a56353dfc",
     },
     True: {
-        0x2190: "50ab0e6e09794328f397c1116aabf7df0591aa6e7cd9573b3ab830958dbcdd88",
+        0x2190: "91de95f9e5b93a354d326afdc84cc70ac8466148cc98a8732dfc65570384fcf6",
         0x2191: "022172ffb68f57c79c1a3de46da978a0d3c89dcd0b2baa10bac06cec606a1c00",
-        0x2192: "a32d22d48e60f5d599b4785c907314e5e63ff8cdd447d9d08784b6752d8a01e3",
+        0x2192: "398f68f4702c89148164bb2bf7696c4db22fa05419b39b1e752b1b0f1a4d7b9e",
         0x2193: "117eef6c0e4ef2c44406a23d2dff83987c77e03c9b899d7c97a7ae9a25d450d2",
         0x21D0: "5a9ed0e52a5e01a96d8e1ac56f721149588d84901b0617291b11ed4440f5e2b3",
         0x21D2: "814cf022e425f0a9af5d6624b73b3a853ed8e93d055200e5e4638482d78ad757",
@@ -757,17 +770,17 @@ _LEGACY_ARROW_HASH = {
 }
 _LEGACY_ARROW_BOUNDS = {
     False: {
-        0x2190: (6, 113, 506, 567),
+        0x2190: (6, 50, 506, 504),
         0x2191: (29, 22, 483, 695),
-        0x2192: (6, 113, 506, 567),
+        0x2192: (6, 50, 506, 504),
         0x2193: (29, -15, 483, 659),
         0x21D0: (6, 155, 506, 546),
         0x21D2: (6, 155, 506, 546),
     },
     True: {
-        0x2190: (6, 107, 506, 574),
+        0x2190: (6, 44, 506, 511),
         0x2191: (22, 14, 490, 701),
-        0x2192: (6, 107, 506, 574),
+        0x2192: (6, 44, 506, 511),
         0x2193: (21, -20, 489, 667),
         0x21D0: (6, 130, 506, 570),
         0x21D2: (6, 130, 506, 570),
@@ -808,13 +821,15 @@ _LEGACY_RETURN_HASH = {
 
 
 def validate_legacy_arrows(font: TTFont, style: str) -> None:
-    """Require exact last-good six-glyph representation."""
+    """Require last-good arrow contours and the local horizontal alignment."""
     bold = "Bold" in style
     cmap, glyf = font.getBestCmap(), font["glyf"]
     expect(cmap[0x21B5], cmap[0x23CE], f"{style} return cmap alias identity")
     for codepoint in (*BASIC_ARROWS, 0x21B5, 0x23CE, 0x21D0, 0x21D2):
         glyph_name = cmap[codepoint]
         points = _LEGACY_RETURN_POINTS[bold] if codepoint in RETURN_MARKS else _LEGACY_ARROW_POINTS[bold][codepoint]
+        if codepoint in HORIZONTAL_ARROWS:
+            points = tuple((x, y + HORIZONTAL_ARROW_Y_SHIFT) for x, y in points)
         expected_name = "carriagereturn" if codepoint in RETURN_MARKS else _LEGACY_ARROW_NAMES[codepoint]
         expected_lsb = (-66 if not bold else -73) if codepoint in RETURN_MARKS else _LEGACY_ARROW_LSB[bold][codepoint]
         expected_hash = _LEGACY_RETURN_HASH[bold] if codepoint in RETURN_MARKS else _LEGACY_ARROW_HASH[bold][codepoint]
@@ -835,6 +850,32 @@ def validate_legacy_arrows(font: TTFont, style: str) -> None:
             expected_hash,
             f"{style} U+{codepoint:04X} glyf fingerprint",
         )
+
+
+def validate_heavy_asterisk(font: TTFont, style: str) -> None:
+    """Require the local U+2731 outline to remain centered in one terminal cell."""
+    bold = "Bold" in style
+    cmap, glyf = font.getBestCmap(), font["glyf"]
+    glyph_name = cmap[HEAVY_ASTERISK_CODEPOINT]
+    expected_bounds = HEAVY_ASTERISK_BOUNDS[bold]
+    expect(glyph_name, "uni2731", f"{style} U+2731 cmap glyph")
+    expect(
+        font["hmtx"].metrics[glyph_name],
+        (512, expected_bounds[0]),
+        f"{style} U+2731 hmtx",
+    )
+    expect(glyf[glyph_name].numberOfContours, 3, f"{style} U+2731 contours")
+    expect(_bounds(font, glyph_name), expected_bounds, f"{style} U+2731 bounds")
+    expect(
+        _contour_bounds(font, glyph_name),
+        HEAVY_ASTERISK_CONTOUR_BOUNDS[bold],
+        f"{style} U+2731 contour bounds",
+    )
+    expect(
+        hashlib.sha256(glyf[glyph_name].compile(glyf)).hexdigest(),
+        HEAVY_ASTERISK_HASH[bold],
+        f"{style} U+2731 glyf fingerprint",
+    )
 
 
 def _computed_global_metrics(font: TTFont) -> dict[str, int]:
@@ -1160,8 +1201,8 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
                         f"({x_min}, {y_min}, {x_max}, {y_max})"
                     )
                 expect(height, CELL_FIT_HEIGHTS[bold][cp], f"{path.name} U+{cp:04X} {class_name} aspect ratio")
-        for cp, expected_bounds in UNCHANGED_AUDITED_BOUNDS[bold].items():
-            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} audited unchanged bounds")
+        for cp, expected_bounds in AUDITED_BOUNDS[bold].items():
+            expect(_bounds(font, cmap[cp]), expected_bounds, f"{path.name} U+{cp:04X} audited bounds")
 
         expect(set(range(0x2580, 0x25A0)) - set(cmap), set(), f"{path.name} Block Elements coverage")
         for cp in range(0x2580, 0x25A0):
@@ -1195,7 +1236,11 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
             [(1024 - x, y) for x, y in right_points],
             f"{path.name} exact white parenthesis mirror",
         )
+        validate_heavy_asterisk(font, style)
         validate_legacy_arrows(font, style)
+        icon_center_sums = {cp: sum(_bounds(font, cmap[cp])[1::2]) for cp in (0x002B, HEAVY_ASTERISK_CODEPOINT, 0x2192)}
+        if max(icon_center_sums.values()) - min(icon_center_sums.values()) > 1:
+            raise AssertionError(f"{path.name} OpenCode icon centerlines differ: {icon_center_sums}")
         for cp in HORIZONTAL_ARROWS:
             x_min, y_min, x_max, y_max = _bounds(font, cmap[cp])
             if x_min < 0 or x_max > 512 or x_max <= x_min or y_max <= y_min:
@@ -1275,6 +1320,7 @@ def validate_shaping(path: Path) -> None:
         ("ASCII", "ABC", [512, 512, 512]),
         ("box drawing", "┌─┐", [512, 512, 512]),
         ("compact arrows", "←↓↑→", [512, 512, 512, 512]),
+        ("OpenCode icons", "+✱→", [512, 512, 512]),
         ("return marks", "↵⏎", [512, 512]),
         ("mirrored double arrows", "⇐⇒", [512, 512]),
         ("white parentheses", "⦅⦆", [1024, 1024]),
@@ -1396,10 +1442,12 @@ def main() -> None:
             (regular, italic, "Regular", "Italic", "Regular/Italic"),
             (bold, bold_italic, "Bold", "BoldItalic", "Bold/BoldItalic"),
         ):
-            left_name, right_name = left.getBestCmap()[0x2714], right.getBestCmap()[0x2714]
-            left_points = list(left["glyf"][left_name].getCoordinates(left["glyf"])[0])
-            right_points = list(right["glyf"][right_name].getCoordinates(right["glyf"])[0])
-            expect(left_points, right_points, f"U+2714 upright {label}")
+            for upright_codepoint in (0x2714, HEAVY_ASTERISK_CODEPOINT):
+                left_name = left.getBestCmap()[upright_codepoint]
+                right_name = right.getBestCmap()[upright_codepoint]
+                left_points = list(left["glyf"][left_name].getCoordinates(left["glyf"])[0])
+                right_points = list(right["glyf"][right_name].getCoordinates(right["glyf"])[0])
+                expect(left_points, right_points, f"U+{upright_codepoint:04X} upright {label}")
             left_owners = ownership_map(summaries[left_style], left_style)
             right_owners = ownership_map(summaries[right_style], right_style)
             left_mplus = {cp for cp, origin in left_owners.items() if origin == "mplus1p"}

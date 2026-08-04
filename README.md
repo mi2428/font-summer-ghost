@@ -8,7 +8,7 @@ It combines Ubuntu Mono Latin glyphs with a compatible, familiar Japanese layer 
 - [NINJAL Hentaigana](https://cid.ninjal.ac.jp/kana/font/) supplies its dedicated 288-codepoint layer directly from the official distribution.
 - [BIZ UDGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) supplies broad Japanese fallback coverage, kanji, and the variation-sequence layer.
 - [IBM Plex Sans JP](https://github.com/IBM/plex/tree/master/packages/plex-sans-jp) remains the fallback for uncovered non-private-use characters.
-- Historical terminal arrow outlines (U+2190..U+2193, U+21B5, U+23CE, U+21D0, U+21D2) are embedded locally from the last-good bits with no external build dependency; other check marks, modifiers, box/block drawing, and semantic geometry remain deterministic local constructions.
+- Historical terminal arrow contours (U+2190..U+2193, U+21B5, U+23CE, U+21D0, U+21D2) are embedded locally from the last-good bits with no external build dependency; U+2190/U+2192 receive a local terminal-icon centerline alignment. U+2731, other check marks, modifiers, box/block drawing, and semantic geometry remain deterministic local constructions.
   Enclosed digits retain IBM Plex Sans JP outlines and receive a local cell fit.
 
 ![](specimen.png)

@@ -35,8 +35,11 @@ UPM, HALF_WIDTH, FULL_WIDTH = 1024, 512, 1024
 ASCENT, DESCENT, ASCII_VERTICAL_SCALE = 850, 174, 1.03
 CELL_FIT_INK_WIDTH = 500
 BASIC_ARROWS = frozenset(range(0x2190, 0x2194))
+HORIZONTAL_ARROW_CODEPOINTS = frozenset({0x2190, 0x2192})
+HORIZONTAL_ARROW_Y_SHIFT = -63
 RETURN_ARROW_CODEPOINT = 0x21B5
 RETURN_SYMBOL_CODEPOINT = 0x23CE
+HEAVY_ASTERISK_CODEPOINT = 0x2731
 ENCLOSED_DIGITS = range(0x2460, 0x2474)
 PLEMOL_REFERENCE_UPM = 1000
 PLEMOL_ENCLOSED_X_SCALE = 0.67
@@ -949,9 +952,11 @@ _LEGACY_RETURN_LSB = {False: -66, True: -73}
 
 
 def _legacy_arrow_glyph(codepoint: int, bold: bool) -> Any:
-    """Construct one exact last-good arrow from embedded on-curve points."""
+    """Construct one last-good arrow with terminal-icon centerline alignment."""
     pen = TTGlyphPen(None)
     points = _LEGACY_ARROW_POINTS[bold][codepoint]
+    if codepoint in HORIZONTAL_ARROW_CODEPOINTS:
+        points = tuple((x, y + HORIZONTAL_ARROW_Y_SHIFT) for x, y in points)
     pen.moveTo(points[0])
     for point in points[1:]:
         pen.lineTo(point)
@@ -967,6 +972,43 @@ def _legacy_return_glyph(bold: bool) -> Any:
     for point in points[1:]:
         pen.lineTo(point)
     pen.closePath()
+    return pen.glyph()
+
+
+def _make_heavy_asterisk_glyph(bold: bool) -> Any:
+    """Construct a centered six-spoke terminal asterisk from local geometry."""
+    center_x, center_y = HALF_WIDTH // 2, 277
+    diagonal_extent = 184
+    diagonal_half_width = 32 if bold else 24
+    vertical_half_width = 44 if bold else 32
+    bottom, top = (40, 514) if bold else (45, 509)
+    pen = TTGlyphPen(None)
+    _draw_rectangle(
+        pen,
+        (center_x - vertical_half_width, bottom, center_x + vertical_half_width, top),
+    )
+
+    low_x, high_x = center_x - diagonal_extent, center_x + diagonal_extent
+    low_y, high_y = center_y - diagonal_extent, center_y + diagonal_extent
+    normal = diagonal_half_width
+    _draw_polygon(
+        pen,
+        (
+            (low_x + normal, low_y - normal),
+            (high_x + normal, high_y - normal),
+            (high_x - normal, high_y + normal),
+            (low_x - normal, low_y + normal),
+        ),
+    )
+    _draw_polygon(
+        pen,
+        (
+            (low_x - normal, high_y - normal),
+            (high_x - normal, low_y - normal),
+            (high_x + normal, low_y + normal),
+            (low_x + normal, high_y + normal),
+        ),
+    )
     return pen.glyph()
 
 
@@ -990,6 +1032,14 @@ def install_terminal_semantics(
     font["hmtx"].metrics[cmap[RETURN_ARROW_CODEPOINT]] = (HALF_WIDTH, _LEGACY_RETURN_LSB[bold])
     cmap[RETURN_SYMBOL_CODEPOINT] = cmap[RETURN_ARROW_CODEPOINT]
     origins[RETURN_ARROW_CODEPOINT] = origins[RETURN_SYMBOL_CODEPOINT] = "generated"
+    _set_mapped_glyph(
+        font,
+        cmap,
+        HEAVY_ASTERISK_CODEPOINT,
+        _make_heavy_asterisk_glyph(bold),
+        "asterisk",
+    )
+    origins[HEAVY_ASTERISK_CODEPOINT] = "generated"
 
 
 def _rectangles_glyph(rectangles: Iterable[tuple[int, int, int, int]]) -> Any:
@@ -1461,7 +1511,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         "scales": scales,
         "sample_origins": {
             f"U+{cp:04X}": origins.get(cp)
-            for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x3042, 0x65E5, 0xFF11, 0x3405)
+            for cp in (0x0041, 0x2190, 0x21B5, 0x23CE, 0x2500, 0x2731, 0x3042, 0x65E5, 0xFF11, 0x3405)
         },
         "ownership": {f"U+{cp:04X}": origins[cp] for cp in sorted(mapping)},
         "neovim_origins": {f"U+{cp:04X}": origins[cp] for cp in (*NEOVIM_GLYPHS, NEOVIM_CHECK)},
