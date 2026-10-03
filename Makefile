@@ -5,8 +5,8 @@ SHELL         := /bin/bash
 UV                 ?= uv
 INSTALL            ?= install
 FONTDIR            ?= $(HOME)/Library/Fonts
-PYTHON             := $(UV) run python
-RUFF               := $(UV) run ruff
+PYTHON             := $(UV) run --locked python
+RUFF               := $(UV) run --locked ruff
 FONTS              := SummerGhost-Regular.ttf SummerGhost-Bold.ttf SummerGhost-Italic.ttf SummerGhost-BoldItalic.ttf
 HELP_NAME_WIDTH    := 18
 HELP_EXAMPLE_WIDTH := 42
@@ -28,7 +28,7 @@ fmt: ## Format Python sources. Use CHECK_ONLY=1 to check only
 .PHONY: lint
 lint: ## Run static Python checks
 	@$(RUFF) check scripts
-	@$(UV) run mypy scripts
+	@$(UV) run --locked mypy scripts
 
 .PHONY: validate
 validate: build ## Validate names, metrics, coverage, and shaping
@@ -39,10 +39,16 @@ specimen: build ## Render the technical specimen into the root and dist/
 	@$(PYTHON) scripts/render_specimen.py
 
 .PHONY: check
-check: ## Run formatting, lint, build, and validation checks
+check: ## Run formatting, lint, tests, build, validation, and render checks
 	@$(MAKE) --no-print-directory fmt CHECK_ONLY=1
 	@$(MAKE) --no-print-directory lint
+	@$(MAKE) --no-print-directory test
 	@$(MAKE) --no-print-directory validate
+	@$(PYTHON) -c 'import sys; sys.path.insert(0, "scripts"); from render_specimen import render; render()'
+
+.PHONY: test
+test: ## Run offline maintenance regression tests
+	@$(PYTHON) -m unittest discover -s scripts -p 'test_*.py'
 
 .PHONY: clean
 clean: ## Remove downloads and generated artifacts

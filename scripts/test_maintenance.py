@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 import unittest
+import urllib.request
+import warnings
+import zipfile
 from contextlib import nullcontext
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -229,6 +234,68 @@ class IncrementalBuildTests(unittest.TestCase):
                 with patch("sys.argv", ["build.py"]):
                     build.main()
                 validate.validate_provenance(json.loads(manifest.read_text()))
+
+
+class SourceFileTests(unittest.TestCase):
+    def test_verified_download_cache_and_failure_cleanup(self) -> None:
+        asset = build.Asset("font.ttf", "https://example.invalid/font.ttf", hashlib.sha256(b"font").hexdigest())
+        with TemporaryDirectory() as directory, patch.object(build, "DOWNLOADS", Path(directory)):
+            destination = Path(directory) / asset.name
+            temporary = Path(directory) / f"{asset.name}.part"
+            with patch.object(urllib.request, "urlopen", return_value=BytesIO(b"font")) as request:
+                build._download(asset)
+                build._download(asset)
+                request.assert_called_once()
+                self.assertEqual(destination.read_bytes(), b"font")
+            destination.write_bytes(b"bad cache")
+            with (
+                patch.object(urllib.request, "urlopen", return_value=BytesIO(b"wrong")),
+                self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"),
+            ):
+                build._download(asset)
+            self.assertFalse(destination.exists())
+            self.assertFalse(temporary.exists())
+
+            response = Mock()
+            response.read.side_effect = [b"partial", OSError("interrupted download")]
+            with (
+                patch.object(urllib.request, "urlopen", return_value=nullcontext(response)),
+                self.assertRaisesRegex(OSError, "interrupted download"),
+            ):
+                build._download(asset)
+            self.assertFalse(destination.exists())
+            self.assertFalse(temporary.exists())
+
+    def test_archive_paths_types_duplicates_and_size_limit(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, destination = root / "archive.zip", root / "sources"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("fonts/font.ttf", b"font")
+            build._safe_extract_zip(archive, destination)
+            self.assertEqual((destination / "fonts/font.ttf").read_bytes(), b"font")
+            for name in ("../escape.ttf", "/escape.ttf", "C:/escape.ttf", "C:\\escape.ttf", "fonts\\escape.ttf"):
+                with zipfile.ZipFile(archive, "w") as bundle:
+                    bundle.writestr(name, b"bad")
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    build._safe_extract_zip(archive, destination)
+            self.assertFalse((root / "escape.ttf").exists())
+            symlink = zipfile.ZipInfo("link")
+            symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr(symlink, b"../escape.ttf")
+            with self.assertRaisesRegex(ValueError, "member type"):
+                build._safe_extract_zip(archive, destination)
+            with zipfile.ZipFile(archive, "w") as bundle, warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                bundle.writestr("duplicate", b"first")
+                bundle.writestr("duplicate", b"second")
+            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                build._safe_extract_zip(archive, destination)
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("too_large", b"three")
+            with patch.object(build, "MAX_ARCHIVE_UNCOMPRESSED_SIZE", 2), self.assertRaisesRegex(ValueError, "exceeds"):
+                build._safe_extract_zip(archive, destination)
 
 
 if __name__ == "__main__":

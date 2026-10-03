@@ -52,6 +52,13 @@ font-codepoint-map = U+2500-U+259F=Summer Ghost
 
 Run `make help` for available targets and installation-directory overrides.
 
+## Maintenance checks
+
+`make test` runs offline regression tests without building or installing fonts.
+`make check` uses the committed dependency lock and checks formatting, lint, types,
+regressions, all four font styles, and specimen rendering without rewriting `specimen.png`.
+The same quality gate runs in CI on Linux/Python 3.10 and macOS/current Python.
+
 ## License
 
 Summer Ghost contains font software covered by the Ubuntu Font Licence 1.0, the SIL Open Font License 1.1, and Apache License 2.0.
