@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import unicodedata2 as unicodedata
+import validate
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
@@ -1538,9 +1539,28 @@ def main() -> None:
     if args.clean:
         clean()
         return
-    roots = fetch_sources()
-    summaries = [build_style(style, roots) for style in args.style or STYLES]
+    styles = tuple(dict.fromkeys(args.style or STYLES))
     provenance = DIST / "provenance.json"
+    summaries: dict[str, Mapping[str, object]] = {}
+    if args.style and provenance.is_file():
+        try:
+            summaries = dict(validate.validate_provenance(json.loads(provenance.read_text()), require_all_styles=False))
+            for style, summary in summaries.items():
+                if style in styles:
+                    continue
+                path = DIST / f"{PS_FAMILY}-{style}.ttf"
+                validate.validate_artifact(summary, style, path)
+                validate.expect(
+                    summary.get("scales"),
+                    {**SOURCE_SCALES, "mplus1p": MPLUS1P_STYLE_SCALES[style]},
+                    f"{style} incremental source scales",
+                )
+                with closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)) as font:
+                    validate.validate_coverage_summary(summary, style, font)
+        except (AssertionError, OSError, ValueError) as exc:
+            raise RuntimeError("Invalid incremental-build provenance; run a full build without --style") from exc
+    roots = fetch_sources()
+    summaries.update((style, build_style(style, roots)) for style in styles)
     document = {
         "family": FAMILY,
         "version": VERSION,
@@ -1548,7 +1568,7 @@ def main() -> None:
         "ibm_commit": IBM_COMMIT,
         "inner_hashes": {"ninjal_hentaigana.ttf": NINJAL_TTF_SHA256},
         "assets": [asdict(asset) for asset in ASSETS],
-        "styles": summaries,
+        "styles": [summaries[style] for style in STYLES if style in summaries],
     }
     temporary = DIST / ".provenance.json.tmp"
     try:

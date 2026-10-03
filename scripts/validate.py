@@ -1351,7 +1351,9 @@ def validate_shaping(path: Path) -> None:
     expect((base[0][1], variant[0][1]), (1024, 1024), f"{path.name} IVS advances")
 
 
-def validate_provenance(data: Mapping[str, object]) -> Mapping[str, Mapping[str, object]]:
+def validate_provenance(
+    data: Mapping[str, object], *, require_all_styles: bool = True
+) -> Mapping[str, Mapping[str, object]]:
     """Validate top-level build provenance and index its style records."""
     expect(data.get("family"), "Summer Ghost", "provenance family")
     expect(data.get("version"), "0.1.0", "provenance version")
@@ -1385,7 +1387,10 @@ def validate_provenance(data: Mapping[str, object]) -> Mapping[str, Mapping[str,
         raise AssertionError("provenance styles must be a list of objects")
     indexed = {entry["style"]: entry for entry in entries}
     expect(len(indexed), len(entries), "provenance unique styles")
-    expect(set(indexed), set(STYLES), "provenance styles")
+    if require_all_styles:
+        expect(set(indexed), set(STYLES), "provenance styles")
+    elif not indexed or set(indexed) - set(STYLES):
+        raise AssertionError("provenance must contain known styles")
     return indexed
 
 

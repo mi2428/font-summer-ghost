@@ -167,5 +167,69 @@ class SpecimenTests(unittest.TestCase):
                     owners[codepoint] = origin
 
 
+class IncrementalBuildTests(unittest.TestCase):
+    def test_incremental_builds_accumulate_and_deduplicate_styles(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            font = Mock()
+            font.getBestCmap.return_value = {0x41: "A"}
+            font.getGlyphOrder.return_value = [".notdef", "A"]
+
+            def fake_build(style: str, _: object) -> dict[str, Any]:
+                path = root / f"SummerGhost-{style}.ttf"
+                path.write_bytes(style.encode())
+                return {
+                    "style": style,
+                    "output": f"dist/{path.name}",
+                    "size_bytes": path.stat().st_size,
+                    "sha256": build.file_sha256(path),
+                    "scales": validate.EXPECTED_SCALES[style],
+                    "ownership": {"U+0041": "ubuntu"},
+                    "codepoints": {origin: int(origin == "ubuntu") for origin in validate.ALLOWED_ORIGINS},
+                    "total_codepoints": 1,
+                    "glyphs": 2,
+                }
+
+            with (
+                patch.object(build, "DIST", root),
+                patch.object(build, "ROOT", root),
+                patch.object(build, "fetch_sources", return_value={}),
+                patch.object(build, "TTFont", return_value=font),
+                patch.object(build, "build_style", side_effect=fake_build) as builder,
+            ):
+                for style in validate.STYLES:
+                    with patch("sys.argv", ["build.py", "--style", style, "--style", style]):
+                        build.main()
+                self.assertEqual(builder.call_count, 4)
+                manifest = root / "provenance.json"
+                before = json.loads(manifest.read_text())
+                validate.validate_provenance(before)
+                with patch("sys.argv", ["build.py", "--style", "Regular"]):
+                    build.main()
+                self.assertEqual(json.loads(manifest.read_text()), before)
+                for mutation in ("bytes", "scales", "recipe"):
+                    changed = deepcopy(before)
+                    if mutation == "bytes":
+                        (root / "SummerGhost-Bold.ttf").write_bytes(b"fake")
+                    elif mutation == "scales":
+                        changed["styles"][1]["scales"] = {}
+                    else:
+                        changed["version"] = "unknown"
+                    manifest.write_text(json.dumps(changed))
+                    count = builder.call_count
+                    with (
+                        patch("sys.argv", ["build.py", "--style", "Regular"]),
+                        self.subTest(mutation=mutation),
+                        self.assertRaisesRegex(RuntimeError, "full build"),
+                    ):
+                        build.main()
+                    self.assertEqual(builder.call_count, count)
+                    (root / "SummerGhost-Bold.ttf").write_bytes(b"Bold")
+                manifest.write_text("corrupted JSON")
+                with patch("sys.argv", ["build.py"]):
+                    build.main()
+                validate.validate_provenance(json.loads(manifest.read_text()))
+
+
 if __name__ == "__main__":
     unittest.main()
