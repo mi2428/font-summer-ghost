@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "Reproducible builder for the Summer Ghost Japanese programming font"
 requires-python = ">=3.10"
 dependencies = [
-  "fonttools==4.60.2",
-  "pillow==11.3.0",
+  "fonttools==4.65.0",
+  "pillow==12.3.0",
   "unicodedata2==17.0.0",
-  "uharfbuzz==0.55.0",
+  "uharfbuzz==0.56.2",
 ]
 
 [dependency-groups]
@@ -27,3 +27,8 @@ select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
 
 [tool.uv]
 package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
