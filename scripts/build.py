@@ -1508,6 +1508,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         "uvs_mappings_from_biz": uvs_count,
         "glyphs": glyph_count,
         "size_bytes": output.stat().st_size,
+        "sha256": file_sha256(output),
         "scales": scales,
         "sample_origins": {
             f"U+{cp:04X}": origins.get(cp)
@@ -1549,7 +1550,12 @@ def main() -> None:
         "assets": [asdict(asset) for asset in ASSETS],
         "styles": summaries,
     }
-    provenance.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    temporary = DIST / ".provenance.json.tmp"
+    try:
+        temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(provenance)
+    finally:
+        temporary.unlink(missing_ok=True)
     print(f"wrote    {provenance.relative_to(ROOT)}")
 
 

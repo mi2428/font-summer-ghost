@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
@@ -1378,11 +1379,34 @@ def validate_provenance(data: Mapping[str, object]) -> Mapping[str, Mapping[str,
     actual_assets = {asset["name"]: (asset["url"], asset["sha256"]) for asset in assets}
     expect(actual_assets, APPROVED_ASSETS, "provenance approved assets")
     entries = data.get("styles")
-    if not isinstance(entries, list) or not all(isinstance(item, dict) for item in entries):
+    if not isinstance(entries, list) or not all(
+        isinstance(item, dict) and isinstance(item.get("style"), str) for item in entries
+    ):
         raise AssertionError("provenance styles must be a list of objects")
     indexed = {entry["style"]: entry for entry in entries}
+    expect(len(indexed), len(entries), "provenance unique styles")
     expect(set(indexed), set(STYLES), "provenance styles")
     return indexed
+
+
+def validate_artifact(summary: Mapping[str, object], style: str, path: Path) -> None:
+    """Bind one provenance record to its exact compiled artifact."""
+    expect(summary.get("output"), f"dist/SummerGhost-{style}.ttf", f"{style} artifact output")
+    expect(summary.get("size_bytes"), path.stat().st_size, f"{style} artifact size")
+    expect(summary.get("sha256"), hashlib.sha256(path.read_bytes()).hexdigest(), f"{style} artifact SHA-256")
+
+
+def validate_coverage_summary(summary: Mapping[str, object], style: str, font: TTFont) -> None:
+    """Compare summary counts with ownership and the compiled cmap/glyph order."""
+    owners = ownership_map(summary, style)
+    expect(set(owners), set(font.getBestCmap()), f"{style} ownership/cmap coverage")
+    counts = summary.get("codepoints")
+    if not isinstance(counts, dict) or not all(type(value) is int and value >= 0 for value in counts.values()):
+        raise AssertionError(f"{style} source counts must be non-negative integers")
+    actual = Counter(owners.values())
+    expect(counts, {origin: actual[origin] for origin in ALLOWED_ORIGINS}, f"{style} ownership source counts")
+    expect(summary.get("total_codepoints"), len(owners), f"{style} total codepoints")
+    expect(summary.get("glyphs"), len(font.getGlyphOrder()), f"{style} artifact glyph count")
 
 
 def main() -> None:
@@ -1396,6 +1420,7 @@ def main() -> None:
         path, summary = DIST / f"SummerGhost-{style}.ttf", summaries[style]
         if not path.is_file():
             raise AssertionError(f"missing {path.name}")
+        validate_artifact(summary, style, path)
         expect(summary.get("scales"), EXPECTED_SCALES[style], f"{style} effective source scales")
         enclosed_bounds[style] = validate_font(path, style)
         validate_shaping(path)
@@ -1407,14 +1432,7 @@ def main() -> None:
         with closing(TTFont(path, recalcBBoxes=False, recalcTimestamp=False)) as font:
             validate_ownership(summary, style, font.getBestCmap())
             validate_non_mplus_representatives(font, style, ownership_map(summary, style))
-        counts = summary.get("codepoints")
-        if not isinstance(counts, dict):
-            raise AssertionError(f"{style} source counts must use approved origins")
-        if set(counts) != ALLOWED_ORIGINS:
-            raise AssertionError(f"{style} source counts must use only approved origins")
-        if not all(isinstance(value, int) and value >= 0 for value in counts.values()):
-            raise AssertionError(f"{style} source counts must be non-negative integers")
-        expect(counts.get("ninjal"), len(NINJAL_CODEPOINTS), f"{style} NINJAL source coverage")
+            validate_coverage_summary(summary, style, font)
         neovim_origins = summary.get("neovim_origins", {})
         if not isinstance(neovim_origins, dict):
             raise AssertionError(f"{style} Neovim provenance is not an object")
@@ -1430,8 +1448,6 @@ def main() -> None:
         )
         expect(neovim_origins.get("U+2714"), "generated", f"{style} check-mark provenance")
         expect(summary.get("uvs_mappings_from_biz"), BIZ_UVS_TOTAL, f"{style} BIZ UVS provenance")
-        expect(sum(counts.values()), summary.get("total_codepoints"), f"{style} source counts")
-        expect(summary.get("size_bytes"), path.stat().st_size, f"{style} artifact size")
     with (
         closing(TTFont(DIST / "SummerGhost-Regular.ttf", recalcBBoxes=False, recalcTimestamp=False)) as regular,
         closing(TTFont(DIST / "SummerGhost-Italic.ttf", recalcBBoxes=False, recalcTimestamp=False)) as italic,
