@@ -13,6 +13,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import validate
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
@@ -109,8 +110,7 @@ JAPANESE_ROWS = (
     Row("CJK PUNCT", "〒 々 〆 〽 「」 『』 【】 〈〉 《》 ・ 、 。 ！？ ￥ …"),
 )
 
-# These sets are provenance probes. The final build may expose a full origin index or
-# only sample anchors; rendering remains useful in either case.
+# These sets are checked against the build's canonical per-codepoint ownership.
 BIZ_ROWS = (
     Row("IPA", "ɐ ɑ ɒ ɓ ɔ ɕ ɖ ɗ ə ɚ ɜ ɞ ɟ ɠ ɡ ɤ ɥ ɦ"),
     Row("PUNCT", "‐ ‖ ‼ ‾ ‿ ⁂ ⁇ ⁈ ⁉ ⁑"),
@@ -243,95 +243,49 @@ def font(style: str = "Regular", size: int = 16) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(BytesIO(font_data(style)), size=size * SCALE)
 
 
-def _asset_label(document: Mapping[str, Any], tokens: Sequence[str], fallback: str) -> str:
-    """Return a compact label without depending on a particular asset filename."""
-    assets = document.get("assets", ())
-    for asset in assets if isinstance(assets, Sequence) else ():
-        if not isinstance(asset, Mapping):
-            continue
-        haystack = " ".join(str(asset.get(key, "")) for key in ("name", "url")).casefold()
-        if all(token.casefold() in haystack for token in tokens):
-            name = str(asset.get("name", fallback)).removesuffix(".zip").removesuffix(".ttf")
-            digest = str(asset.get("sha256", ""))
-            suffix = f" / {digest[:8]}" if len(digest) >= 8 else ""
-            return f"{name.upper()}{suffix}"
-    return fallback
+def _asset_label(document: Mapping[str, Any], name: str) -> str:
+    """Label one asset from the validated, current build recipe."""
+    asset = next(asset for asset in document["assets"] if asset["name"] == name)
+    label = name.removesuffix(".zip").removesuffix(".ttf").upper()
+    return f"{label} / {asset['sha256'][:8]}"
 
 
 def _style_record(document: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Read the first style record while accepting future provenance wrappers."""
-    styles = document.get("styles", ())
-    if isinstance(styles, Sequence) and styles and isinstance(styles[0], Mapping):
-        return styles[0]
-    raise ValueError("provenance has no readable style record")
-
-
-def _parse_codepoint(raw_codepoint: object) -> int:
-    """Parse integer or U+XXXX provenance keys."""
-    if isinstance(raw_codepoint, int):
-        return raw_codepoint
-    text = str(raw_codepoint).strip()
-    if text[:2].casefold() == "u+":
-        text = text[2:]
-    return int(text, 16)
+    """Select Regular explicitly from the current validated provenance schema."""
+    return validate.validate_provenance(document)["Regular"]
 
 
 def read_sources() -> Sources:
     """Derive visible source labels and verify provenance origin anchors."""
     document: dict[str, Any] = json.loads(PROVENANCE.read_text(encoding="utf-8"))
-    style = _style_record(document)
-    origins = style.get("sample_origins", {})
-    if not isinstance(origins, Mapping):
-        origins = {}
-    expected = {"U+0041": "ubuntu", "U+3042": "mplus1p", "U+FF11": "biz", "U+3405": "ibm"}
+    origins = regular_source_origins(document)
+    expected = {0x0041: "ubuntu", 0x3042: "mplus1p", 0xFF11: "biz", 0x3405: "ibm"}
     mismatches = {
-        codepoint: (expected_source, origins[codepoint])
+        f"U+{codepoint:04X}": (expected_source, origins.get(codepoint))
         for codepoint, expected_source in expected.items()
-        if codepoint in origins and origins[codepoint] != expected_source
+        if origins.get(codepoint) != expected_source
     }
     if mismatches:
         raise ValueError(f"provenance anchors changed: {mismatches}")
     return Sources(
-        ubuntu=_asset_label(document, ("ubuntu",), "UBUNTU MONO / ASCII SOURCE"),
-        mplus1p=_asset_label(document, ("mplus1p", "regular"), "M PLUS 1P / JAPANESE BASE"),
-        biz=_asset_label(document, ("bizudgothic",), "BIZ UDGOTHIC / JAPANESE FALLBACK"),
-        ninjal=_asset_label(document, ("ninjal",), "NINJAL HENTAIGANA / DIRECT LAYER"),
-        ibm=_asset_label(document, ("ibmplexsansjp", "regular"), "IBM PLEX SANS JP / FALLBACK"),
+        ubuntu=_asset_label(document, "ubuntu-font-family-0.83.zip"),
+        mplus1p=_asset_label(document, "MPLUS1p-Regular.ttf"),
+        biz=_asset_label(document, "BIZUDGothic-1.051.zip"),
+        ninjal=_asset_label(document, "ninjal_hentaigana.zip"),
+        ibm=_asset_label(document, "IBMPlexSansJP-Regular.ttf"),
         generated="GENERATED / SEMANTIC GEOMETRY",
     )
 
 
 def regular_source_origins(document: Mapping[str, Any]) -> Mapping[int, str]:
-    """Read an optional provenance origin index without importing the builder."""
-    style = _style_record(document)
-    candidates = (style.get("codepoint_origins"), style.get("origins"), document.get("origin_index"))
-    candidate = next((value for value in candidates if isinstance(value, Mapping)), {})
-    parsed: dict[int, str] = {}
-    for raw_codepoint, origin in candidate.items():
-        try:
-            codepoint = _parse_codepoint(raw_codepoint)
-        except (TypeError, ValueError):
-            continue
-        parsed[codepoint] = str(origin)
-    return parsed
+    """Require the canonical Regular ownership index without legacy fallbacks."""
+    return validate.ownership_map(_style_record(document), "Regular")
 
 
 def validate_fallback_samples() -> None:
     """Verify fallback labels against source precedence and final font coverage."""
     document: dict[str, Any] = json.loads(PROVENANCE.read_text(encoding="utf-8"))
-    style = _style_record(document)
-    origins = dict(regular_source_origins(document))
-    sample_origins = style.get("sample_origins", {})
-    if isinstance(sample_origins, Mapping):
-        for raw_codepoint, origin in sample_origins.items():
-            try:
-                origins[_parse_codepoint(raw_codepoint)] = str(origin)
-            except (TypeError, ValueError):
-                continue
-    allowed = {"ubuntu", "mplus1p", "biz", "ninjal", "ibm", "generated"}
-    unknown = sorted(set(origins.values()) - allowed)
-    if unknown:
-        raise ValueError(f"unsupported provenance origins: {unknown}")
+    origins = regular_source_origins(document)
     with TTFont(BytesIO(font_data("Regular")), lazy=True) as generated:
         cmap = generated.getBestCmap()
     for expected_source, sample_rows in (("biz", BIZ_ROWS), ("ninjal", NINJAL_ROWS), ("ibm", IBM_ROWS)):
@@ -340,7 +294,7 @@ def validate_fallback_samples() -> None:
             wrong_origins = [
                 f"U+{codepoint:04X}:{origins.get(codepoint, 'missing')}"
                 for codepoint in codepoints
-                if codepoint in origins and origins[codepoint] != expected_source
+                if origins.get(codepoint) != expected_source
             ]
             if wrong_origins:
                 raise ValueError(f"{expected_source} {row.label} origin mismatch: {wrong_origins}")

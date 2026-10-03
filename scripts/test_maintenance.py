@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,6 +13,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import build
+import render_specimen as specimen
 import validate
 
 
@@ -96,6 +98,73 @@ class ProvenanceTests(unittest.TestCase):
                 build.main()
             self.assertEqual(json.loads(manifest.read_text()), {"previous": True})
             self.assertFalse((root / ".provenance.json.tmp").exists())
+
+
+class SpecimenTests(unittest.TestCase):
+    def test_source_labels_require_canonical_anchors(self) -> None:
+        document = provenance()
+        owners = {"U+0041": "ubuntu", "U+3042": "mplus1p", "U+FF11": "biz", "U+3405": "ibm"}
+        document["styles"][0]["ownership"] = owners
+        with patch.object(Path, "read_text", side_effect=lambda **_: json.dumps(document)):
+            self.assertIn("MPLUS1P-REGULAR", specimen.read_sources().mplus1p)
+            for replacement in (None, "biz"):
+                if replacement is None:
+                    del owners["U+3042"]
+                else:
+                    owners["U+3042"] = replacement
+                with self.subTest(replacement=replacement), self.assertRaisesRegex(ValueError, "anchors changed"):
+                    specimen.read_sources()
+
+    def test_regular_ownership_is_required_and_selected_by_name(self) -> None:
+        document = provenance()
+        document["styles"][0]["ownership"] = {"U+0041": "ubuntu"}
+        document["styles"].reverse()
+        self.assertEqual(specimen.regular_source_origins(document), {0x41: "ubuntu"})
+        regular = next(record for record in document["styles"] if record["style"] == "Regular")
+        for ownership in (None, {}, {"bad key": "ubuntu"}, {"U+0041": "unknown"}):
+            regular["ownership"] = ownership
+            with self.subTest(ownership=ownership), self.assertRaises(AssertionError):
+                specimen.regular_source_origins(document)
+
+    def test_fallback_samples_reject_missing_or_wrong_owners(self) -> None:
+        document = provenance()
+        owners = {
+            f"U+{ord(character):04X}": origin
+            for origin, rows in (
+                ("biz", specimen.BIZ_ROWS),
+                ("ninjal", specimen.NINJAL_ROWS),
+                ("ibm", specimen.IBM_ROWS),
+            )
+            for row in rows
+            for character in row.sample
+            if not character.isspace()
+        }
+        document["styles"][0]["ownership"] = owners
+        font = Mock()
+        font.getBestCmap.return_value = {int(key[2:], 16): key for key in owners}
+        with (
+            patch.object(Path, "read_text", side_effect=lambda **_: json.dumps(document)),
+            patch.object(specimen, "font_data", return_value=b""),
+            patch.object(specimen, "TTFont", return_value=nullcontext(font)),
+        ):
+            specimen.validate_fallback_samples()
+            for origin, row in (
+                ("biz", specimen.BIZ_ROWS[0]),
+                ("ninjal", specimen.NINJAL_ROWS[0]),
+                ("ibm", specimen.IBM_ROWS[0]),
+            ):
+                codepoint = f"U+{ord(row.sample[0]):04X}"
+                for replacement in (None, "generated"):
+                    if replacement is None:
+                        del owners[codepoint]
+                    else:
+                        owners[codepoint] = replacement
+                    with (
+                        self.subTest(origin=origin, replacement=replacement),
+                        self.assertRaisesRegex(ValueError, "origin mismatch"),
+                    ):
+                        specimen.validate_fallback_samples()
+                    owners[codepoint] = origin
 
 
 if __name__ == "__main__":
