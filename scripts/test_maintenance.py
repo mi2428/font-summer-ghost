@@ -20,6 +20,7 @@ from unittest.mock import Mock, patch
 import build
 import render_specimen as specimen
 import validate
+from fontTools.ttLib import TTFont, newTable
 
 
 def provenance() -> dict[str, Any]:
@@ -296,6 +297,125 @@ class SourceFileTests(unittest.TestCase):
                 bundle.writestr("too_large", b"three")
             with patch.object(build, "MAX_ARCHIVE_UNCOMPRESSED_SIZE", 2), self.assertRaisesRegex(ValueError, "exceeds"):
                 build._safe_extract_zip(archive, destination)
+
+
+class BoxDrawingTests(unittest.TestCase):
+    @staticmethod
+    def boxes(bold: bool) -> tuple[TTFont, dict[int, str]]:
+        font = TTFont()
+        font["glyf"] = newTable("glyf")
+        font["glyf"].glyphs = {}
+        font["hmtx"] = newTable("hmtx")
+        font["hmtx"].metrics = {}
+        font.setGlyphOrder([])
+        cmap: dict[int, str] = {}
+        build.replace_box_drawing(font, cmap, {}, bold)
+        return font, cmap
+
+    @staticmethod
+    def rectangles(glyph: Any) -> list[tuple[int, int, int, int]]:
+        rectangles = []
+        start = 0
+        for end in glyph.endPtsOfContours:
+            points = glyph.coordinates[start : end + 1]
+            rectangles.append(
+                (
+                    min(x for x, _ in points),
+                    min(y for _, y in points),
+                    max(x for x, _ in points),
+                    max(y for _, y in points),
+                )
+            )
+            start = end + 1
+        return rectangles
+
+    def test_directional_weights_and_rail_counts_at_cell_edges(self) -> None:
+        cases = {
+            0x250D: {"down": "light", "right": "heavy"},
+            0x250E: {"down": "heavy", "right": "light"},
+            0x251E: {"up": "heavy", "right": "light", "down": "light"},
+            0x253F: {"up": "light", "down": "light", "left": "heavy", "right": "heavy"},
+            0x2543: {"left": "heavy", "up": "heavy", "right": "light", "down": "light"},
+            0x2552: {"down": "light", "right": "double"},
+            0x2553: {"down": "double", "right": "light"},
+            0x255E: {"down": "light", "up": "light", "right": "double"},
+            0x256C: {direction: "double" for direction in ("up", "down", "left", "right")},
+            0x257C: {"left": "light", "right": "heavy"},
+        }
+        for bold in (False, True):
+            font, cmap = self.boxes(bold)
+            light = round(512 * (0.22 if bold else 0.17))
+            rail_half = max(32, light // 2) // 2
+            offset = rail_half + max(24, light // 3) // 2
+            for cp, arms in cases.items():
+                rectangles = self.rectangles(font["glyf"][cmap[cp]])
+                for direction in ("left", "right", "down", "up"):
+                    horizontal = direction in ("left", "right")
+                    edge = {"left": 0, "right": 512, "down": -174, "up": 850}[direction]
+                    center = 338 if horizontal else 256
+                    intervals = sorted(
+                        {
+                            (y0, y1) if horizontal else (x0, x1)
+                            for x0, y0, x1, y1 in rectangles
+                            if (x0 <= edge <= x1 if horizontal else y0 <= edge <= y1)
+                        }
+                    )
+                    arm = arms.get(direction)
+                    expected = []
+                    if arm == "double":
+                        expected = [
+                            (center - offset - rail_half, center - offset + rail_half),
+                            (center + offset - rail_half, center + offset + rail_half),
+                        ]
+                    elif arm:
+                        half = light if arm == "heavy" else light // 2
+                        expected = [(center - half, center + half)]
+                    with self.subTest(bold=bold, cp=f"U+{cp:04X}", direction=direction):
+                        self.assertEqual(intervals, expected)
+
+    def test_double_junctions_connect_without_filling_rail_gaps(self) -> None:
+        for bold in (False, True):
+            font, cmap = self.boxes(bold)
+            light = round(512 * (0.22 if bold else 0.17))
+            offset = max(32, light // 2) // 2 + max(24, light // 3) // 2
+
+            def ink(cp: int, x: float, y: float, font: TTFont = font, cmap: dict[int, str] = cmap) -> bool:
+                return any(
+                    x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in self.rectangles(font["glyf"][cmap[cp]])
+                )
+
+            with self.subTest(bold=bold):
+                self.assertTrue(ink(0x2552, 256, 338 + offset))
+                self.assertTrue(ink(0x2553, 256 - offset, 338))
+                self.assertTrue(ink(0x2554, 256 - offset / 2, 338 + offset))
+                self.assertTrue(ink(0x2554, 256 - offset, 338 + offset / 2))
+                self.assertFalse(ink(0x2560, 256 + offset, 338))
+                for sign in (-1, 1):
+                    self.assertFalse(ink(0x256C, 256 + sign * offset, 338))
+                    self.assertFalse(ink(0x256C, 256, 338 + sign * offset))
+                    for other_sign in (-1, 1):
+                        self.assertTrue(ink(0x256C, 256 + sign * offset, 338 + other_sign * offset))
+
+    def test_arcs_are_curved_mirrored_and_every_box_fits_its_cell(self) -> None:
+        for bold in (False, True):
+            font, cmap = self.boxes(bold)
+            self.assertEqual(set(cmap), set(range(0x2500, 0x2580)))
+            base = font["glyf"][cmap[0x256D]]
+            for cp, sx, sy in ((0x256D, 1, 1), (0x256E, -1, 1), (0x256F, -1, -1), (0x2570, 1, -1)):
+                glyph = font["glyf"][cmap[cp]]
+                with self.subTest(bold=bold, cp=f"U+{cp:04X}"):
+                    self.assertEqual(list(glyph.flags), list(base.flags))
+                    self.assertEqual(
+                        list(glyph.coordinates),
+                        [(256 + sx * (x - 256), 338 + sy * (y - 338)) for x, y in base.coordinates],
+                    )
+                    self.assertEqual(sum(not flag & 1 for flag in glyph.flags), 4)
+            for cp, name in cmap.items():
+                glyph = font["glyf"][name]
+                with self.subTest(bold=bold, cp=f"U+{cp:04X}"):
+                    self.assertEqual(font["hmtx"][name][0], 512)
+                    self.assertTrue(0 <= glyph.xMin <= glyph.xMax <= 512)
+                    self.assertTrue(-174 <= glyph.yMin <= glyph.yMax <= 850)
 
 
 if __name__ == "__main__":

@@ -670,7 +670,6 @@ def replace_box_drawing(
                 (count for token, count in (("QUADRUPLE", 4), ("TRIPLE", 3), ("DOUBLE", 2)) if token in name_tokens),
                 1,
             )
-        double_line = "DOUBLE" in name_tokens and dash_count == 0
         heavy = "HEAVY" in name and "LIGHT" not in name
         thickness = heavy_thickness if heavy else light_thickness
         if diagonal:
@@ -681,77 +680,114 @@ def replace_box_drawing(
                 diagonals = ((0, bottom, HALF_WIDTH, top), (0, top, HALF_WIDTH, bottom))
             for x0, y0, x1, y1 in diagonals:
                 _draw_polygon(pen, line_polygon((x0, y0), (x1, y1), thickness))
-            if double_line:
-                _draw_polygon(pen, line_polygon((8, top), (HALF_WIDTH - 8, bottom), max(thickness // 2, 20)))
+        elif "ARC" in name_tokens:
+            arc = TransformPen(
+                pen, (1 if "RIGHT" in name_tokens else -1, 0, 0, 1 if "DOWN" in name_tokens else -1, center_x, center_y)
+            )
+            half, radius = light_thickness // 2, HALF_WIDTH // 4
+            outer, inner = radius + half, radius - half
+            tangent, diagonal_ratio = 2**0.5 - 1, 2**-0.5
+            arc.moveTo((HALF_WIDTH // 2, half))
+            arc.lineTo((radius, half))
+            arc.qCurveTo(
+                (radius - outer * tangent, half), (radius - outer * diagonal_ratio, -radius + outer * diagonal_ratio)
+            )
+            arc.qCurveTo((-half, -radius + outer * tangent), (-half, -radius))
+            arc.lineTo((-half, bottom - center_y))
+            arc.lineTo((half, bottom - center_y))
+            arc.lineTo((half, -radius))
+            arc.qCurveTo(
+                (half, -radius + inner * tangent), (radius - inner * diagonal_ratio, -radius + inner * diagonal_ratio)
+            )
+            arc.qCurveTo((radius - inner * tangent, -half), (radius, -half))
+            arc.lineTo((HALF_WIDTH // 2, -half))
+            arc.closePath()
         else:
-            directions = set()
-            for token, direction in (("LEFT", "left"), ("RIGHT", "right"), ("UP", "up"), ("DOWN", "down")):
-                if token in name_tokens:
-                    directions.add(direction)
-            if "HORIZONTAL" in name:
-                directions.update(("left", "right"))
-            if "VERTICAL" in name:
-                directions.update(("up", "down"))
-            if cross:
-                directions.update(("left", "right", "up", "down"))
-            if not directions:
-                directions.update(("left", "right"))
+            styles = ("LIGHT", "HEAVY", "SINGLE", "DOUBLE")
+            default_style = next(token for token in name.split() if token in styles)
+            arms: dict[str, str] = {}
+            for clause in name.split(" AND "):
+                tokens = clause.split()
+                arm_style = next((token for token in tokens if token in styles), default_style)
+                for token, directions in (
+                    ("LEFT", ("left",)),
+                    ("RIGHT", ("right",)),
+                    ("UP", ("up",)),
+                    ("DOWN", ("down",)),
+                    ("HORIZONTAL", ("left", "right")),
+                    ("VERTICAL", ("up", "down")),
+                ):
+                    if token in tokens:
+                        arms.update((direction, arm_style) for direction in directions)
+            if not arms:
+                raise ValueError(f"unsupported box drawing name: {name}")
 
-            def arm_thickness(direction: str, box_name: str = name, base_thickness: int = thickness) -> int:
-                token = direction.upper()
-                if f"HEAVY {token}" in box_name:
-                    return heavy_thickness
-                if f"LIGHT {token}" in box_name:
-                    return light_thickness
-                return base_thickness
+            arm_thickness = {
+                direction: double_rail_thickness
+                if style == "DOUBLE"
+                else heavy_thickness
+                if style == "HEAVY"
+                else light_thickness
+                for direction, style in arms.items()
+            }
+            arm_rails = {
+                direction: (-double_rail_offset, double_rail_offset) if style == "DOUBLE" else (0,)
+                for direction, style in arms.items()
+            }
 
-            if dash_count and directions == {"left", "right"}:
-                draw_horizontal(pen, 0, HALF_WIDTH, center_y, arm_thickness("left"), dash_count)
-            elif dash_count and directions == {"up", "down"}:
-                draw_vertical(pen, bottom, top, center_x, arm_thickness("up"), dash_count)
+            def junction_end(direction: str, rail: int, box_arms: Mapping[str, str] = arms) -> int:
+                """Join rail centerlines without closing the gap through a double junction."""
+                sign = 1 if direction in ("right", "up") else -1
+                perpendicular = ("up", "down") if direction in ("left", "right") else ("left", "right")
+                neighbors = [neighbor for neighbor in perpendicular if neighbor in box_arms]
+                doubled = [neighbor for neighbor in neighbors if box_arms[neighbor] == "DOUBLE"]
+                if not neighbors:
+                    return 0
+                if box_arms[direction] == "DOUBLE":
+                    endpoint = 0
+                    if len(doubled) == 2:
+                        endpoint = sign * double_rail_offset
+                    elif doubled:
+                        other_sign = 1 if doubled[0] in ("right", "up") else -1
+                        endpoint = sign * other_sign * rail
+                    return endpoint - sign * (double_rail_thickness // 2)
+                return -sign * (double_rail_offset + double_rail_thickness // 2) if doubled else 0
+
+            if dash_count and set(arms) == {"left", "right"}:
+                draw_horizontal(pen, 0, HALF_WIDTH, center_y, arm_thickness["left"], dash_count)
+            elif dash_count and set(arms) == {"up", "down"}:
+                draw_vertical(pen, bottom, top, center_x, arm_thickness["up"], dash_count)
             else:
-                horizontal_rails = (
-                    (center_y - double_rail_offset, center_y + double_rail_offset) if double_line else (center_y,)
-                )
-                vertical_rails = (
-                    (center_x - double_rail_offset, center_x + double_rail_offset) if double_line else (center_x,)
-                )
-                for y in horizontal_rails:
-                    if "left" in directions:
+                horizontal = ("left", "right")
+                vertical = ("down", "up")
+                for rail in sorted(
+                    {rail for direction in horizontal if direction in arms for rail in arm_rails[direction]}
+                ):
+                    for direction in horizontal:
+                        if direction not in arms or rail not in arm_rails[direction]:
+                            continue
+                        endpoint = center_x + junction_end(direction, rail)
                         draw_horizontal(
                             pen,
-                            0,
-                            center_x,
-                            y,
-                            double_rail_thickness if double_line else arm_thickness("left"),
+                            0 if direction == "left" else endpoint,
+                            endpoint if direction == "left" else HALF_WIDTH,
+                            center_y + rail,
+                            arm_thickness[direction],
                             dash_count,
                         )
-                    if "right" in directions:
-                        draw_horizontal(
-                            pen,
-                            center_x,
-                            HALF_WIDTH,
-                            y,
-                            double_rail_thickness if double_line else arm_thickness("right"),
-                            dash_count,
-                        )
-                for x in vertical_rails:
-                    if "down" in directions:
+                for rail in sorted(
+                    {rail for direction in vertical if direction in arms for rail in arm_rails[direction]}
+                ):
+                    for direction in vertical:
+                        if direction not in arms or rail not in arm_rails[direction]:
+                            continue
+                        endpoint = center_y + junction_end(direction, rail)
                         draw_vertical(
                             pen,
-                            bottom,
-                            center_y,
-                            x,
-                            double_rail_thickness if double_line else arm_thickness("down"),
-                            dash_count,
-                        )
-                    if "up" in directions:
-                        draw_vertical(
-                            pen,
-                            center_y,
-                            top,
-                            x,
-                            double_rail_thickness if double_line else arm_thickness("up"),
+                            bottom if direction == "down" else endpoint,
+                            endpoint if direction == "down" else top,
+                            center_x + rail,
+                            arm_thickness[direction],
                             dash_count,
                         )
         glyph = pen.glyph()
