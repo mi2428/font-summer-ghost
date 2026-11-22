@@ -65,7 +65,7 @@ GEOMETRIC_CELL_FIT_SYMBOLS = frozenset(
     }
 )
 EVERYDAY_CELL_FIT_SYMBOLS = frozenset({0x203B, 0x2103, 0x2109, 0x2600, 0x2601, 0x2602, 0x260E, 0x266A, 0x266F, 0x2713})
-IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
+IBM_COMMIT = "89cba80dad75561262e758f4b6ddd474c5119796"
 MPLUS1P_COMMIT = "2796410152d4f9524b68ed46e69c1b60f8e0f7c3"
 NINJAL_TTF_SHA256 = "e1301406c49dffed801bc12f0bb6a148f90215d4cf7d3a7bb0831cd798f6345e"
 NINJAL_CODEPOINTS = frozenset({0x3099, 0x309A, *range(0x1B001, 0x1B11F)})
@@ -294,13 +294,13 @@ ASSETS: tuple[Asset, ...] = (
         "IBMPlexSansJP-Regular.ttf",
         f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
         "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf",
-        "825b5c933c3fdb380eb84195788559103ae12710098218a1848376e35a45fcce",
+        "0168493ae143d16e4c0d374c090b1ee5eab9ee475536d2e429368dbcfc4a6abe",
     ),
     Asset(
         "IBMPlexSansJP-Bold.ttf",
         f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
         "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf",
-        "85645e1bc1f92778e06c100c7bc6c6720b1d3955a8eee8d38c805589f59a261e",
+        "070c08915b21a9484e31a73594e4aae69991e4477959a96a6ab4031f4e30ec9f",
     ),
 )
 STYLE_PARTS = {

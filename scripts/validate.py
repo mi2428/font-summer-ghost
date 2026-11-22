@@ -20,7 +20,7 @@ from fontTools.ttLib import TTFont
 
 ROOT, STYLES = Path(__file__).resolve().parents[1], ("Regular", "Bold", "Italic", "BoldItalic")
 DIST = ROOT / "dist"
-IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
+IBM_COMMIT = "89cba80dad75561262e758f4b6ddd474c5119796"
 MPLUS1P_COMMIT = "2796410152d4f9524b68ed46e69c1b60f8e0f7c3"
 NINJAL_ARCHIVE_SHA256 = "62b01c19cb40dc4b64b1e1da776fca483e19e21c2772cc3f9db9a067bedbc84d"
 NINJAL_TTF_SHA256 = "e1301406c49dffed801bc12f0bb6a148f90215d4cf7d3a7bb0831cd798f6345e"
@@ -140,12 +140,12 @@ APPROVED_ASSETS = {
     "IBMPlexSansJP-Regular.ttf": (
         f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
         "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf",
-        "825b5c933c3fdb380eb84195788559103ae12710098218a1848376e35a45fcce",
+        "0168493ae143d16e4c0d374c090b1ee5eab9ee475536d2e429368dbcfc4a6abe",
     ),
     "IBMPlexSansJP-Bold.ttf": (
         f"https://raw.githubusercontent.com/IBM/plex/{IBM_COMMIT}/packages/"
         "plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf",
-        "85645e1bc1f92778e06c100c7bc6c6720b1d3955a8eee8d38c805589f59a261e",
+        "070c08915b21a9484e31a73594e4aae69991e4477959a96a6ab4031f4e30ec9f",
     ),
 }
 BIZ_UVS_TOTAL = 10_160

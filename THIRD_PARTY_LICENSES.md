@@ -41,14 +41,15 @@ This notice supplements, and does not replace, the license files shipped by each
 - License: Apache License 2.0 (the official archive's readme and license notice)
 - Copyright: National Institute for Japanese Language and Linguistics (NINJAL), 2018
 
-## IBM Plex Sans JP
+## IBM Plex Sans JP 3.0.0
 
 - Source: [IBM Plex](https://github.com/IBM/plex/tree/master/packages/plex-sans-jp)
-- Pinned commit: `ceee82fa88781b8310b198fd302480efaeac609e`
-- Regular file: `https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf`
-- Regular SHA-256: `825b5c933c3fdb380eb84195788559103ae12710098218a1848376e35a45fcce`
-- Bold file: `https://raw.githubusercontent.com/IBM/plex/ceee82fa88781b8310b198fd302480efaeac609e/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf`
-- Bold SHA-256: `85645e1bc1f92778e06c100c7bc6c6720b1d3955a8eee8d38c805589f59a261e`
+- Release: [`@ibm/plex-sans-jp@3.0.0`](https://github.com/IBM/plex/releases/tag/%40ibm/plex-sans-jp%403.0.0); internal font version 1.004
+- Pinned commit: `89cba80dad75561262e758f4b6ddd474c5119796`
+- Regular file: `https://raw.githubusercontent.com/IBM/plex/89cba80dad75561262e758f4b6ddd474c5119796/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Regular.ttf`
+- Regular SHA-256: `0168493ae143d16e4c0d374c090b1ee5eab9ee475536d2e429368dbcfc4a6abe`
+- Bold file: `https://raw.githubusercontent.com/IBM/plex/89cba80dad75561262e758f4b6ddd474c5119796/packages/plex-sans-jp/fonts/complete/ttf/unhinted/IBMPlexSansJP-Bold.ttf`
+- Bold SHA-256: `070c08915b21a9484e31a73594e4aae69991e4477959a96a6ab4031f4e30ec9f`
 - License: SIL Open Font License 1.1; reserved font name `Plex`
 - Copyright: IBM Corp.
 - Enclosed digits use IBM Plex Sans JP outlines and are locally fitted to the Summer Ghost half-width cell.
