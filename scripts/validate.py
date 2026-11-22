@@ -24,8 +24,99 @@ IBM_COMMIT = "ceee82fa88781b8310b198fd302480efaeac609e"
 MPLUS1P_COMMIT = "2796410152d4f9524b68ed46e69c1b60f8e0f7c3"
 NINJAL_ARCHIVE_SHA256 = "62b01c19cb40dc4b64b1e1da776fca483e19e21c2772cc3f9db9a067bedbc84d"
 NINJAL_TTF_SHA256 = "e1301406c49dffed801bc12f0bb6a148f90215d4cf7d3a7bb0831cd798f6345e"
-ALLOWED_ORIGINS = frozenset({"ubuntu", "mplus1p", "biz", "ninjal", "ibm", "generated"})
+ALLOWED_ORIGINS = frozenset({"ubuntu", "mplus1p", "biz", "ninjal", "ibm", "nerd", "dejavu", "jetbrains", "generated"})
+NERD_COMMIT = "fa7b859994228a9c8759f99c55a8d31ee92a1b5e"
+JETBRAINS_COMMIT = "19371302b95d218af43299bce79ddbddd0bc364d"
+NERD_CODEPOINTS = frozenset(
+    {
+        0xE0B4,
+        0xE0B6,
+        0xE235,
+        0xF126,
+        0xF0079,
+        0xF007D,
+        0xF0083,
+        0xF0084,
+        0xF008E,
+        0xF011B,
+        0xF013C,
+        0xF013F,
+        0xF0140,
+        0xF0143,
+        0xF015A,
+        0xF0E0F,
+    }
+)
+UI_SYMBOLS = frozenset({0x21D5, 0x21E1, 0x21E3, 0x237D, 0x2718, 0x2726, 0x276E, 0x276F, 0x27E8, 0x27E9})
+BRAILLE_CODEPOINTS = range(0x2800, 0x2900)
+CAP_CODEPOINTS = frozenset({0xE0B4, 0xE0B6})
+CAP_OUTLINE_HASH = {
+    0xE0B4: "999485651b26ccf76a196745071b55c7ccc3700a070873f49a793c6687c76050",
+    0xE0B6: "721e6151fcac11e2dbbc19fd6879563e6fc1520ad6978f02ea62ad63235360b4",
+}
+JETBRAINS_UI_SYMBOLS = frozenset({0x276E, 0x276F, 0x27E8, 0x27E9})
+UI_OPTICAL_BOUNDS = {
+    0x21D5: (135, 0, 450, 523),
+    0x21E1: (135, 0, 450, 523),
+    0x21E3: (135, 0, 450, 523),
+    0x237D: (12, -221, 573, 86),
+    0x2718: (24, -2, 561, 628),
+    0x2726: (20, -11, 565, 537),
+    0x276E: (145, 0, 438, 706),
+    0x276F: (142, 0, 435, 706),
+    0x27E8: (121, -111, 469, 788),
+    0x27E9: (111, -111, 459, 788),
+}
+STARSHIP_CODEPOINTS = (NERD_CODEPOINTS - {0xE0B4, 0xE0B6, 0xF013C, 0xF013F, 0xF0140, 0xF0143}) | {
+    0x00BB,
+    0x2261,
+    0x21D5,
+    0x21E1,
+    0x21E3,
+    0x2718,
+    0x2726,
+    0x276E,
+    0x276F,
+}
 APPROVED_ASSETS = {
+    "SymbolsNerdFont-Regular.ttf": (
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/"
+        "patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFont-Regular.ttf",
+        "71db104aa66567d0efe0b98758f9dfc1895573a453fe85fb53d1c38544a55106",
+    ),
+    "JetBrainsMono-Regular.ttf": (
+        f"https://raw.githubusercontent.com/JetBrains/JetBrainsMono/{JETBRAINS_COMMIT}/fonts/ttf/JetBrainsMono-Regular.ttf",
+        "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1",
+    ),
+    "JetBrainsMono-LICENSE.txt": (
+        f"https://raw.githubusercontent.com/JetBrains/JetBrainsMono/{JETBRAINS_COMMIT}/OFL.txt",
+        "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697",
+    ),
+    "dejavu-fonts-ttf-2.37.zip": (
+        "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip",
+        "7576310b219e04159d35ff61dd4a4ec4cdba4f35c00e002a136f00e96a908b0a",
+    ),
+    "NerdFontsSymbols-LICENSE.txt": (
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/patched-fonts/NerdFontsSymbolsOnly/LICENSE",
+        "84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847",
+    ),
+    "FontAwesome-LICENSE.txt": (
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/src/glyphs/font-awesome/LICENSE.txt",
+        "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d",
+    ),
+    "FontAwesomeExtension-LICENSE.txt": (
+        "https://raw.githubusercontent.com/AndreLGava/font-awesome-extension/"
+        "09d80249058ee8018a45da30add4339289dbb466/LICENCE",
+        "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5",
+    ),
+    "MaterialDesign-LICENSE.txt": (
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/src/glyphs/materialdesign/LICENSE",
+        "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829",
+    ),
+    "Apache-2.0-LICENSE.txt": (
+        "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    ),
     "ubuntu-font-family-0.83.zip": (
         "https://assets.ubuntu.com/v1/0cef8205-ubuntu-font-family-0.83.zip",
         "61a2b342526fd552f19fef438bb9211a8212de19ad96e32a1209c039f1d68ecf",
@@ -463,6 +554,19 @@ def validate_ownership(summary: Mapping[str, object], style: str, cmap: Mapping[
         f"{style} generated semantic ownership",
     )
     expect(owners.get(CHECK_MARK_CODEPOINT), "generated", f"{style} check-mark ownership")
+    for origin, codepoints in (
+        ("nerd", NERD_CODEPOINTS - CAP_CODEPOINTS),
+        ("dejavu", UI_SYMBOLS - JETBRAINS_UI_SYMBOLS),
+        ("jetbrains", JETBRAINS_UI_SYMBOLS),
+    ):
+        expect(
+            {cp for cp, owner in owners.items() if owner == origin}, set(codepoints), f"{style} {origin} UI ownership"
+        )
+    expect(
+        {cp for cp in set(BRAILLE_CODEPOINTS) | CAP_CODEPOINTS if owners.get(cp) != "generated"},
+        set(),
+        f"{style} generated minimap and caps",
+    )
 
 
 def name(font: TTFont, name_id: int) -> str:
@@ -490,6 +594,53 @@ def _bounds(font: TTFont, glyph_name: str) -> tuple[int, int, int, int]:
     glyph = font["glyf"][glyph_name]
     glyph.recalcBounds(font["glyf"])
     return glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax
+
+
+def validate_ui_glyphs(font: TTFont, style: str) -> None:
+    """Require the exact PUA allowlist, one-cell UI ink, and a fixed Braille grid."""
+    cmap = font.getBestCmap()
+    expect({cp for cp in cmap if is_private_use(cp)}, set(NERD_CODEPOINTS), f"{style} private-use allowlist")
+    required = NERD_CODEPOINTS | UI_SYMBOLS | set(BRAILLE_CODEPOINTS) | STARSHIP_CODEPOINTS
+    expect(required - set(cmap), set(), f"{style} UI coverage")
+    for cp in sorted(required):
+        glyph_name = cmap[cp]
+        expect(font["hmtx"].metrics[glyph_name][0], 512, f"{style} U+{cp:04X} UI advance")
+        bounds = _bounds(font, glyph_name)
+        if cp == 0x2800:
+            expect(font["glyf"][glyph_name].numberOfContours, 0, f"{style} blank Braille")
+        elif bounds == (0, 0, 0, 0):
+            raise AssertionError(f"{style} U+{cp:04X} UI glyph is empty")
+        if cp in UI_SYMBOLS:
+            # Preserve the measured fallback bearings, including small ink
+            # overhangs. The advance remains exactly one cell.
+            expect(bounds, UI_OPTICAL_BOUNDS[cp], f"{style} U+{cp:04X} optical placement")
+        elif cp in NERD_CODEPOINTS | set(BRAILLE_CODEPOINTS):
+            pen = BoundsPen(font.getGlyphSet())
+            font.getGlyphSet()[glyph_name].draw(pen)
+            if pen.bounds is not None:
+                x_min, y_min, x_max, y_max = pen.bounds
+                if not (-1 <= x_min <= x_max <= 513 and -175 <= y_min <= y_max <= 851):
+                    raise AssertionError(f"{style} U+{cp:04X} UI ink exceeds its cell: {pen.bounds}")
+    for cp in (0xE0B4, 0xE0B6):
+        expect(_bounds(font, cmap[cp]), (0, -174, 512, 850), f"{style} U+{cp:04X} cap connection")
+        expect(
+            hashlib.sha256(font["glyf"][cmap[cp]].compile(font["glyf"])).hexdigest(),
+            CAP_OUTLINE_HASH[cp],
+            f"{style} U+{cp:04X} optical cap outline",
+        )
+    dot_bounds = (
+        (93, 688, 163, 757),
+        (93, 432, 163, 501),
+        (93, 176, 163, 245),
+        (349, 688, 419, 757),
+        (349, 432, 419, 501),
+        (349, 176, 419, 245),
+        (93, -80, 163, -11),
+        (349, -80, 419, -11),
+    )
+    for cp in BRAILLE_CODEPOINTS:
+        expected = tuple(sorted(bounds for bit, bounds in enumerate(dot_bounds) if (cp - 0x2800) & (1 << bit)))
+        expect(_contour_bounds(font, cmap[cp]), expected, f"{style} U+{cp:04X} fixed Braille dots")
 
 
 def validate_mplus_optical_balance(font: TTFont, style: str) -> None:
@@ -1023,8 +1174,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
         widths = {font["hmtx"][glyph][0] for glyph in set(cmap.values())}
         if unexpected := widths - {0, 512, 1024}:
             raise AssertionError(f"{path.name} has unexpected advances: {sorted(unexpected)}")
-        if pua := [cp for cp in cmap if is_private_use(cp)]:
-            raise AssertionError(f"{path.name} maps {len(pua)} private-use codepoints")
+        validate_ui_glyphs(font, style)
         expect(set(cmap) & ORPHAN_CODEPOINTS, set(), f"{path.name} approved orphan removals")
         missing = [f"{description} U+{cp:04X}" for cp, description in REQUIRED.items() if cp not in cmap]
         if missing:
@@ -1080,7 +1230,7 @@ def validate_font(path: Path, style: str) -> tuple[tuple[int, int, int, int], ..
 
         extents = [_bounds(font, glyph)[1::2] for glyph in set(cmap.values())]
         min_y, max_y = min(low for low, _ in extents), max(high for _, high in extents)
-        if min_y < -220 or max_y > 920:
+        if min_y < -224 or max_y > 920:
             raise AssertionError(f"{path.name} has excessive vertical overhang: {min_y}..{max_y}")
         if os2.usWinAscent < head.yMax or os2.usWinDescent < -head.yMin:
             raise AssertionError(f"{path.name} Windows metrics can clip outlines")
@@ -1332,9 +1482,23 @@ def validate_shaping(path: Path) -> None:
         ("space-adjacent circled digit", "A① ", [512, 512, 512]),
         ("line-end circled digit", "A①", [512, 512]),
         ("complete blocks", "▀▄▌▐▖▗▘▙▚▛▜▝▞▟", [512] * 14),
+        (
+            "UI subset",
+            "".join(chr(cp) for cp in sorted(NERD_CODEPOINTS | UI_SYMBOLS | STARSHIP_CODEPOINTS)),
+            [512] * len(NERD_CODEPOINTS | UI_SYMBOLS | STARSHIP_CODEPOINTS),
+        ),
+        ("complete Braille", "".join(chr(cp) for cp in BRAILLE_CODEPOINTS), [512] * 256),
     ):
         run = shape(font, text)
         expect([advance for _, advance in run], expected, f"{path.name} {label} advances")
+        if any(glyph == 0 for glyph, _ in run):
+            raise AssertionError(f"{path.name} {label} shaped a missing glyph")
+    for cp in NERD_CODEPOINTS | UI_SYMBOLS | set(BRAILLE_CODEPOINTS) | STARSHIP_CODEPOINTS:
+        char = chr(cp)
+        isolated = shape(font, char)
+        expect(len(isolated), 1, f"{path.name} U+{cp:04X} isolated UI glyph count")
+        for text in (f"A{char}Z", f"日{char}本", f"A{char} ", f"A{char}"):
+            expect(shape(font, text)[1], isolated[0], f"{path.name} U+{cp:04X} contextual UI shape")
     return_marks = shape(font, "↵⏎")
     expect(return_marks[0][0], return_marks[1][0], f"{path.name} return marks shape to one glyph")
     text = "".join(chr(cp) for cp in ENCLOSED_DIGITS)

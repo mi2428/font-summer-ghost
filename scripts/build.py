@@ -20,6 +20,7 @@ from typing import Any
 import unicodedata2 as unicodedata
 import validate
 from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -91,7 +92,7 @@ ORPHAN_CODEPOINTS = frozenset(
 if len(ORPHAN_CODEPOINTS) != 87:
     raise AssertionError("ORPHAN_CODEPOINTS must contain exactly 87 codepoints")
 SOURCE_ORDER = ("ubuntu", "mplus1p", "ninjal", "biz", "ibm")
-PROVENANCE_ORIGINS = (*SOURCE_ORDER, "generated")
+PROVENANCE_ORIGINS = (*SOURCE_ORDER, "nerd", "dejavu", "jetbrains", "generated")
 SOURCE_SCALES = {"mplus1p": 1.0, "biz": 0.87, "ninjal": 1.0, "ibm": 0.90}
 MPLUS1P_STYLE_SCALES = {
     "Regular": 0.91,
@@ -165,6 +166,46 @@ NEOVIM_GLYPHS: Mapping[int, int] = {
     0x2C7D: 0x56,
 }
 NEOVIM_CHECK = 0x2714
+NERD_COMMIT = "fa7b859994228a9c8759f99c55a8d31ee92a1b5e"
+NERD_CODEPOINTS = frozenset(
+    {
+        0xE0B4,
+        0xE0B6,
+        0xE235,
+        0xF126,
+        0xF0079,
+        0xF007D,
+        0xF0083,
+        0xF0084,
+        0xF008E,
+        0xF011B,
+        0xF013C,
+        0xF013F,
+        0xF0140,
+        0xF0143,
+        0xF015A,
+        0xF0E0F,
+    }
+)
+UI_SYMBOLS = frozenset({0x21D5, 0x21E1, 0x21E3, 0x237D, 0x2718, 0x2726, 0x276E, 0x276F, 0x27E8, 0x27E9})
+BRAILLE_CODEPOINTS = range(0x2800, 0x2900)
+CAP_CODEPOINTS = frozenset({0xE0B4, 0xE0B6})
+JETBRAINS_COMMIT = "19371302b95d218af43299bce79ddbddd0bc364d"
+JETBRAINS_UI_SYMBOLS = frozenset({0x276E, 0x276F, 0x27E8, 0x27E9})
+UI_REFERENCE_X_HEIGHT = 532
+# Compensate CoreText smoothing against Ghostty 1.4's 12 pt, 1x sprites.
+# Other sizes/scales retain proportional geometry, not pixel-identical sprites.
+CAP_OPTICAL_TANGENT = 0.48
+BRAILLE_DOTS = (
+    (93, 688, 163, 757),
+    (93, 432, 163, 501),
+    (93, 176, 163, 245),
+    (349, 688, 419, 757),
+    (349, 432, 419, 501),
+    (349, 176, 419, 245),
+    (93, -80, 163, -11),
+    (349, -80, 419, -11),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +218,53 @@ class Asset:
 
 
 ASSETS: tuple[Asset, ...] = (
+    Asset(
+        "SymbolsNerdFont-Regular.ttf",
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/"
+        "patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFont-Regular.ttf",
+        "71db104aa66567d0efe0b98758f9dfc1895573a453fe85fb53d1c38544a55106",
+    ),
+    Asset(
+        "JetBrainsMono-Regular.ttf",
+        f"https://raw.githubusercontent.com/JetBrains/JetBrainsMono/{JETBRAINS_COMMIT}/fonts/ttf/JetBrainsMono-Regular.ttf",
+        "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1",
+    ),
+    Asset(
+        "JetBrainsMono-LICENSE.txt",
+        f"https://raw.githubusercontent.com/JetBrains/JetBrainsMono/{JETBRAINS_COMMIT}/OFL.txt",
+        "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697",
+    ),
+    Asset(
+        "dejavu-fonts-ttf-2.37.zip",
+        "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip",
+        "7576310b219e04159d35ff61dd4a4ec4cdba4f35c00e002a136f00e96a908b0a",
+    ),
+    Asset(
+        "NerdFontsSymbols-LICENSE.txt",
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/patched-fonts/NerdFontsSymbolsOnly/LICENSE",
+        "84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847",
+    ),
+    Asset(
+        "FontAwesome-LICENSE.txt",
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/src/glyphs/font-awesome/LICENSE.txt",
+        "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d",
+    ),
+    Asset(
+        "FontAwesomeExtension-LICENSE.txt",
+        "https://raw.githubusercontent.com/AndreLGava/font-awesome-extension/"
+        "09d80249058ee8018a45da30add4339289dbb466/LICENCE",
+        "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5",
+    ),
+    Asset(
+        "MaterialDesign-LICENSE.txt",
+        f"https://raw.githubusercontent.com/ryanoasis/nerd-fonts/{NERD_COMMIT}/src/glyphs/materialdesign/LICENSE",
+        "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829",
+    ),
+    Asset(
+        "Apache-2.0-LICENSE.txt",
+        "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    ),
     Asset(
         "ubuntu-font-family-0.83.zip",
         "https://assets.ubuntu.com/v1/0cef8205-ubuntu-font-family-0.83.zip",
@@ -338,6 +426,7 @@ def fetch_sources() -> Mapping[str, Path]:
         ("ubuntu-font-family-0.83.zip", "ubuntu"),
         ("ninjal_hentaigana.zip", "ninjal"),
         ("BIZUDGothic-1.051.zip", "biz"),
+        ("dejavu-fonts-ttf-2.37.zip", "dejavu"),
     ):
         _safe_extract_zip(DOWNLOADS / archive, extracted / directory)
 
@@ -350,6 +439,9 @@ def fetch_sources() -> Mapping[str, Path]:
         "ninjal": ninjal_matches[0].parent,
         "biz": extracted / "biz",
         "ibm": DOWNLOADS,
+        "nerd": DOWNLOADS,
+        "jetbrains": DOWNLOADS,
+        "dejavu": extracted / "dejavu" / "dejavu-fonts-ttf-2.37",
     }
 
 
@@ -1233,6 +1325,81 @@ def normalize_terminal_glyphs(
     _add_white_parentheses(font, cmap, origins)
 
 
+def install_ui_glyphs(
+    target: TTFont,
+    fonts: Mapping[str, TTFont],
+    cmap: MutableMapping[int, str],
+    origins: MutableMapping[int, str],
+) -> None:
+    """Preserve fallback proportions and baselines rather than centering every symbol."""
+    for source, codepoints, origin in (
+        ("nerd", NERD_CODEPOINTS - CAP_CODEPOINTS, "nerd"),
+        ("dejavu", UI_SYMBOLS - JETBRAINS_UI_SYMBOLS, "dejavu"),
+        ("jetbrains", JETBRAINS_UI_SYMBOLS, "jetbrains"),
+    ):
+        font = fonts[source]
+        source_cmap, glyph_set = font.getBestCmap(), font.getGlyphSet()
+        missing = set(codepoints) - set(source_cmap)
+        if missing:
+            raise ValueError(f"{source} lacks UI codepoints: {sorted(missing)}")
+        for cp in sorted(codepoints):
+            pen = TTGlyphPen(None)
+            bounds_pen = BoundsPen(glyph_set)
+            glyph_set[source_cmap[cp]].draw(bounds_pen)
+            if bounds_pen.bounds is None:
+                raise ValueError(f"{source} U+{cp:04X} has no ink")
+            x_min, y_min, x_max, y_max = bounds_pen.bounds
+            width, height = x_max - x_min, y_max - y_min
+            if width <= 0 or height <= 0:
+                raise ValueError(f"{source} U+{cp:04X} has degenerate ink")
+            if source == "nerd":
+                scale = min(UPM / font["head"].unitsPerEm, HALF_WIDTH / width, UPM / height)
+                dx = HALF_WIDTH / 2 - (x_min + x_max) * scale / 2
+                dy = (ASCENT - DESCENT) / 2 - (y_min + y_max) * scale / 2
+            else:
+                # These are the pinned sources' x-heights. Ghostty normalizes
+                # fallback size to the Regular primary face, even in styled text.
+                scale = UI_REFERENCE_X_HEIGHT / (550 if source == "jetbrains" else 1120)
+                dx = dy = 0.0
+            recording = DecomposingRecordingPen(glyph_set)
+            glyph_set[source_cmap[cp]].draw(recording)
+            recording.replay(TransformPen(pen, (scale, 0, 0, scale, dx, dy)))
+            _set_mapped_glyph(target, cmap, cp, pen.glyph(), origin)
+            origins[cp] = origin
+
+    # Eight shared square-dot positions on the reference 6x12-pixel cell.
+    # Keep them proportional at other sizes; do not fit patterns individually.
+    for cp in BRAILLE_CODEPOINTS:
+        rectangles = [dot for bit, dot in enumerate(BRAILLE_DOTS) if (cp - 0x2800) & (1 << bit)]
+        _set_mapped_glyph(target, cmap, cp, _rectangles_glyph(rectangles), "braille")
+        origins[cp] = "generated"
+
+    pen = TTGlyphPen(None)
+    arc = Cu2QuPen(pen, max_err=0.25)
+    radius = HALF_WIDTH
+    tangent = radius * CAP_OPTICAL_TANGENT
+    center = (ASCENT - DESCENT) / 2
+    arc.moveTo((0, -DESCENT))
+    arc.curveTo((tangent, -DESCENT), (radius, center - tangent), (radius, center))
+    arc.curveTo((radius, center + tangent), (tangent, ASCENT), (0, ASCENT))
+    arc.closePath()
+    right_cap = pen.glyph()
+    _set_mapped_glyph(target, cmap, 0xE0B4, right_cap, "cap")
+    _set_mapped_glyph(target, cmap, 0xE0B6, _transform_glyph(right_cap, (-1, 0, 0, 1, HALF_WIDTH, 0)), "cap")
+    origins[0xE0B4] = origins[0xE0B6] = "generated"
+
+
+def write_license_notice(roots: Mapping[str, Path]) -> None:
+    """Ship the copied glyphs' original notices alongside the generated fonts."""
+    texts = [(ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")]
+    for asset in ASSETS:
+        if asset.name.endswith("-LICENSE.txt"):
+            texts.append(f"\n\n--- {asset.name} ---\n\n" + (DOWNLOADS / asset.name).read_text(encoding="utf-8"))
+    texts.append("\n\n--- DejaVu LICENSE ---\n\n" + (roots["dejavu"] / "LICENSE").read_text(encoding="utf-8"))
+    DIST.mkdir(parents=True, exist_ok=True)
+    (DIST / "THIRD_PARTY_LICENSES.txt").write_text("\n".join(texts), encoding="utf-8")
+
+
 class GlyphCopier:
     """Copy decomposed outlines into a target font at a fixed cell width."""
 
@@ -1369,7 +1536,10 @@ def set_names(font: TTFont, style: str) -> None:
     subfamily = "Bold Italic" if style == "BoldItalic" else style
     postscript = f"{PS_FAMILY}-{style}"
     values = {
-        0: "Contains Ubuntu Mono, M PLUS 1p, BIZ UDGothic, NINJAL Hentaigana, and IBM Plex Sans JP.",
+        0: (
+            "Contains Ubuntu Mono, M PLUS 1p, BIZ UDGothic, NINJAL Hentaigana, "
+            "IBM Plex Sans JP, Nerd Fonts, DejaVu and JetBrains Mono."
+        ),
         1: FAMILY,
         2: subfamily,
         3: f"{VERSION};SGST;{postscript}",
@@ -1460,6 +1630,11 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
     """Build one style and return its machine-readable provenance."""
     scales = {**SOURCE_SCALES, "mplus1p": MPLUS1P_STYLE_SCALES[style]}
     files = {source: roots[source] / name for source, name in zip(SOURCE_ORDER, STYLES[style], strict=True)}
+    files.update(
+        nerd=roots["nerd"] / "SymbolsNerdFont-Regular.ttf",
+        dejavu=roots["dejavu"] / "ttf" / "DejaVuSansMono.ttf",
+        jetbrains=roots["jetbrains"] / "JetBrainsMono-Regular.ttf",
+    )
     missing = [f"{source}: {path}" for source, path in files.items() if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing source files: " + ", ".join(missing))
@@ -1515,6 +1690,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         install_terminal_semantics(target, mapping, origins, "Bold" in style)
         replace_box_drawing(target, mapping, origins, "Bold" in style)
         normalize_terminal_glyphs(target, fonts["ibm"], mapping, origins)
+        install_ui_glyphs(target, fonts, mapping, origins)
         remove_orphans(mapping, origins)
         target.setGlyphOrder(target.getGlyphOrder())
         target["maxp"].numGlyphs = len(target.getGlyphOrder())
@@ -1524,6 +1700,7 @@ def build_style(style: str, roots: Mapping[str, Path]) -> Mapping[str, object]:
         set_metadata(target, style, mapping)
 
         DIST.mkdir(parents=True, exist_ok=True)
+        write_license_notice(roots)
         output, temporary = DIST / f"{PS_FAMILY}-{style}.ttf", DIST / f".{PS_FAMILY}-{style}.tmp"
         try:
             target.save(temporary, reorderTables=False)
