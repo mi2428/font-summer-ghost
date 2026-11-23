@@ -316,7 +316,7 @@ class UIGlyphTests(unittest.TestCase):
         build.rebuild_cmap(font, cmap, {})
         return font
 
-    def test_ui_subset_is_one_cell_and_braille_patterns_do_not_move(self) -> None:
+    def test_ui_advances_are_one_cell_without_shrinking_ink(self) -> None:
         box = [(100, -100, 1100, 1500)]
         dejavu_bounds = {
             0x21D5: (284, 0, 948, 1101),
@@ -332,8 +332,12 @@ class UIGlyphTests(unittest.TestCase):
             0x27E8: (125, -115, 485, 815),
             0x27E9: (115, -115, 475, 815),
         }
+        nerd_bounds = {
+            cp: [(0, 0, 2 * width, 2 * height)] for cp, (width, height) in validate.NERD_OPTICAL_SIZES.items()
+        }
+        nerd_bounds[0xF011B] = [(100, -200, 1796, 1124)]
         fonts = {
-            "nerd": self.font(dict.fromkeys(build.NERD_CODEPOINTS, box)),
+            "nerd": self.font(nerd_bounds),
             "dejavu": self.font({cp: [bounds] for cp, bounds in dejavu_bounds.items()}),
             "jetbrains": self.font({cp: [bounds] for cp, bounds in jetbrains_bounds.items()}),
         }
@@ -348,7 +352,10 @@ class UIGlyphTests(unittest.TestCase):
         self.assertEqual(set(owners), build.NERD_CODEPOINTS | build.UI_SYMBOLS | set(build.BRAILLE_CODEPOINTS))
         self.assertEqual(build.NERD_CODEPOINTS, validate.NERD_CODEPOINTS)
         self.assertEqual(build.UI_SYMBOLS, validate.UI_SYMBOLS)
+        self.assertEqual(set(validate.NERD_OPTICAL_SIZES), build.NERD_CODEPOINTS - build.CAP_CODEPOINTS)
         self.assertEqual({asset.name: (asset.url, asset.sha256) for asset in build.ASSETS}, validate.APPROVED_ASSETS)
+        self.assertEqual(validate._bounds(target, cmap[0xF011B]), (-168, 7, 680, 669))
+        self.assertEqual(target["hmtx"].metrics[cmap[0xF011B]], (512, -168))
         for mutation in (
             "unapproved PUA",
             "missing glyph",
@@ -357,6 +364,8 @@ class UIGlyphTests(unittest.TestCase):
             "cap gap",
             "cap reshaped",
             "symbol recentered",
+            "wide icon shrunk",
+            "icon shifted",
         ):
             font = deepcopy(target)
             mapping = font.getBestCmap()
@@ -366,6 +375,14 @@ class UIGlyphTests(unittest.TestCase):
                 del mapping[0xF0140]
             elif mutation == "wrong width":
                 font["hmtx"].metrics[mapping[0xF0140]] = (1024, 0)
+            elif mutation == "wide icon shrunk":
+                glyph = font["glyf"][mapping[0xF011B]]
+                for index, (x, y) in enumerate(glyph.coordinates):
+                    glyph.coordinates[index] = (round(256 + (x - 256) * 512 / 848), round(338 + (y - 338) * 512 / 848))
+            elif mutation == "icon shifted":
+                glyph = font["glyf"][mapping[0xF011B]]
+                for index, (x, y) in enumerate(glyph.coordinates):
+                    glyph.coordinates[index] = (x, y + 16)
             elif mutation == "cap reshaped":
                 glyph = font["glyf"][mapping[0xE0B4]]
                 x, y = glyph.coordinates[1]

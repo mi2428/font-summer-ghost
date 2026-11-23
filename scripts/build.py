@@ -197,14 +197,14 @@ UI_REFERENCE_X_HEIGHT = 532
 # Other sizes/scales retain proportional geometry, not pixel-identical sprites.
 CAP_OPTICAL_TANGENT = 0.48
 BRAILLE_DOTS = (
-    (93, 688, 163, 757),
-    (93, 432, 163, 501),
-    (93, 176, 163, 245),
-    (349, 688, 419, 757),
-    (349, 432, 419, 501),
-    (349, 176, 419, 245),
-    (93, -80, 163, -11),
-    (349, -80, 419, -11),
+    (94, 678, 162, 746),
+    (94, 430, 162, 498),
+    (94, 182, 162, 250),
+    (318, 678, 386, 746),
+    (318, 430, 386, 498),
+    (318, 182, 386, 250),
+    (94, -66, 162, 2),
+    (318, -66, 386, 2),
 )
 
 
@@ -1353,7 +1353,9 @@ def install_ui_glyphs(
             if width <= 0 or height <= 0:
                 raise ValueError(f"{source} U+{cp:04X} has degenerate ink")
             if source == "nerd":
-                scale = min(UPM / font["head"].unitsPerEm, HALF_WIDTH / width, UPM / height)
+                # Keep natural ink size: Ghostty fits wide icons to their
+                # neighbors at render time. The advance is still one cell.
+                scale = UPM / font["head"].unitsPerEm
                 dx = HALF_WIDTH / 2 - (x_min + x_max) * scale / 2
                 dy = (ASCENT - DESCENT) / 2 - (y_min + y_max) * scale / 2
             else:
@@ -1367,8 +1369,8 @@ def install_ui_glyphs(
             _set_mapped_glyph(target, cmap, cp, pen.glyph(), origin)
             origins[cp] = origin
 
-    # Eight shared square-dot positions on the reference 6x12-pixel cell.
-    # Keep them proportional at other sizes; do not fit patterns individually.
+    # One square-dot grid checked at 12/14 pt, not per-pattern fitting.
+    # Fixed outlines cannot exactly match size-dependent sprite rounding.
     for cp in BRAILLE_CODEPOINTS:
         rectangles = [dot for bit, dot in enumerate(BRAILLE_DOTS) if (cp - 0x2800) & (1 << bit)]
         _set_mapped_glyph(target, cmap, cp, _rectangles_glyph(rectangles), "braille")

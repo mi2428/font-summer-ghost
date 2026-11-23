@@ -55,6 +55,23 @@ CAP_OUTLINE_HASH = {
     0xE0B6: "721e6151fcac11e2dbbc19fd6879563e6fc1520ad6978f02ea62ad63235360b4",
 }
 JETBRAINS_UI_SYMBOLS = frozenset({0x276E, 0x276F, 0x27E8, 0x27E9})
+# Dimensions of the pinned donor's glyf bounds after UPM conversion, not advances.
+NERD_OPTICAL_SIZES = {
+    0xE235: (994, 992),
+    0xF126: (828, 944),
+    0xF0079: (512, 852),
+    0xF007D: (512, 852),
+    0xF0083: (510, 852),
+    0xF0084: (512, 852),
+    0xF008E: (512, 852),
+    0xF011B: (848, 662),
+    0xF013C: (512, 572),
+    0xF013F: (512, 572),
+    0xF0140: (512, 316),
+    0xF0143: (512, 316),
+    0xF015A: (852, 852),
+    0xF0E0F: (859, 510),
+}
 UI_OPTICAL_BOUNDS = {
     0x21D5: (135, 0, 450, 523),
     0x21E1: (135, 0, 450, 523),
@@ -597,8 +614,9 @@ def _bounds(font: TTFont, glyph_name: str) -> tuple[int, int, int, int]:
 
 
 def validate_ui_glyphs(font: TTFont, style: str) -> None:
-    """Require the exact PUA allowlist, one-cell UI ink, and a fixed Braille grid."""
+    """Require one-cell advances, natural icon ink, and a fixed Braille grid."""
     cmap = font.getBestCmap()
+    glyph_set = font.getGlyphSet()
     expect({cp for cp in cmap if is_private_use(cp)}, set(NERD_CODEPOINTS), f"{style} private-use allowlist")
     required = NERD_CODEPOINTS | UI_SYMBOLS | set(BRAILLE_CODEPOINTS) | STARSHIP_CODEPOINTS
     expect(required - set(cmap), set(), f"{style} UI coverage")
@@ -614,9 +632,23 @@ def validate_ui_glyphs(font: TTFont, style: str) -> None:
             # Preserve the measured fallback bearings, including small ink
             # overhangs. The advance remains exactly one cell.
             expect(bounds, UI_OPTICAL_BOUNDS[cp], f"{style} U+{cp:04X} optical placement")
-        elif cp in NERD_CODEPOINTS | set(BRAILLE_CODEPOINTS):
-            pen = BoundsPen(font.getGlyphSet())
-            font.getGlyphSet()[glyph_name].draw(pen)
+        elif cp in NERD_OPTICAL_SIZES:
+            x_min, y_min, x_max, y_max = bounds
+            width, height = NERD_OPTICAL_SIZES[cp]
+            if abs(x_max - x_min - width) > 1 or abs(y_max - y_min - height) > 1:
+                raise AssertionError(f"{style} U+{cp:04X} natural icon size changed: {bounds}")
+            if not (-257 <= x_min <= x_max <= 769 and -175 <= y_min <= y_max <= 851):
+                raise AssertionError(f"{style} U+{cp:04X} icon ink exceeds two-cell context: {bounds}")
+            pen = BoundsPen(glyph_set)
+            glyph_set[glyph_name].draw(pen)
+            if pen.bounds is None:
+                raise AssertionError(f"{style} U+{cp:04X} icon has no ink")
+            ink_x_min, ink_y_min, ink_x_max, ink_y_max = pen.bounds
+            if abs((ink_x_min + ink_x_max) / 2 - 256) > 1 or abs((ink_y_min + ink_y_max) / 2 - 338) > 1:
+                raise AssertionError(f"{style} U+{cp:04X} icon ink is not centered: {pen.bounds}")
+        elif cp in CAP_CODEPOINTS | set(BRAILLE_CODEPOINTS):
+            pen = BoundsPen(glyph_set)
+            glyph_set[glyph_name].draw(pen)
             if pen.bounds is not None:
                 x_min, y_min, x_max, y_max = pen.bounds
                 if not (-1 <= x_min <= x_max <= 513 and -175 <= y_min <= y_max <= 851):
@@ -629,14 +661,14 @@ def validate_ui_glyphs(font: TTFont, style: str) -> None:
             f"{style} U+{cp:04X} optical cap outline",
         )
     dot_bounds = (
-        (93, 688, 163, 757),
-        (93, 432, 163, 501),
-        (93, 176, 163, 245),
-        (349, 688, 419, 757),
-        (349, 432, 419, 501),
-        (349, 176, 419, 245),
-        (93, -80, 163, -11),
-        (349, -80, 419, -11),
+        (94, 678, 162, 746),
+        (94, 430, 162, 498),
+        (94, 182, 162, 250),
+        (318, 678, 386, 746),
+        (318, 430, 386, 498),
+        (318, 182, 386, 250),
+        (94, -66, 162, 2),
+        (318, -66, 386, 2),
     )
     for cp in BRAILLE_CODEPOINTS:
         expected = tuple(sorted(bounds for bit, bounds in enumerate(dot_bounds) if (cp - 0x2800) & (1 << bit)))
