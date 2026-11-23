@@ -60,11 +60,13 @@ clean: ## Remove downloads and generated artifacts
 install: validate ## Install all styles into FONTDIR
 	@mkdir -p "$(FONTDIR)"
 	@for font in $(FONTS); do $(INSTALL) -m 0644 "dist/$$font" "$(FONTDIR)/$$font"; done
+	@$(INSTALL) -m 0644 dist/THIRD_PARTY_LICENSES.txt "$(FONTDIR)/SummerGhost-LICENSES.txt"
 	@printf 'Installed Summer Ghost into %s\n' "$(FONTDIR)"
 
 .PHONY: uninstall
 uninstall: ## Remove Summer Ghost from FONTDIR
 	@for font in $(FONTS); do rm -f "$(FONTDIR)/$$font"; done
+	@rm -f "$(FONTDIR)/SummerGhost-LICENSES.txt"
 	@printf 'Removed Summer Ghost from %s\n' "$(FONTDIR)"
 
 ##@ Help

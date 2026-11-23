@@ -10,6 +10,7 @@ It combines Ubuntu Mono Latin glyphs with a compatible, familiar Japanese layer 
 - [IBM Plex Sans JP](https://github.com/IBM/plex/tree/master/packages/plex-sans-jp) remains the fallback for uncovered non-private-use characters.
 - Historical terminal arrow contours (U+2190..U+2193, U+21B5, U+23CE, U+21D0, U+21D2) are embedded locally from the last-good bits with no external build dependency; U+2190/U+2192 receive a local terminal-icon centerline alignment. U+2731, other check marks, modifiers, box/block drawing, and semantic geometry remain deterministic local constructions.
   Enclosed digits retain IBM Plex Sans JP outlines and receive a local cell fit.
+- [Nerd Fonts Symbols](https://github.com/ryanoasis/nerd-fonts), [DejaVu](https://dejavu-fonts.github.io/), and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) supply selected symbols and icons.
 
 ![](specimen.png)
 
@@ -61,5 +62,5 @@ The same quality gate runs in CI on Linux/Python 3.10 and macOS/current Python.
 
 ## License
 
-Summer Ghost contains font software covered by the Ubuntu Font Licence 1.0, the SIL Open Font License 1.1, and Apache License 2.0.
+Summer Ghost contains font software covered by the Ubuntu Font Licence 1.0, the SIL Open Font License 1.1, Apache License 2.0, the MIT License, and the DejaVu/Bitstream Vera license terms.
 See [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES.md) for attribution and license details.

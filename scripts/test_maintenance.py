@@ -299,6 +299,109 @@ class SourceFileTests(unittest.TestCase):
                 build._safe_extract_zip(archive, destination)
 
 
+class UIGlyphTests(unittest.TestCase):
+    @staticmethod
+    def font(mapping: dict[int, list[tuple[int, int, int, int]]]) -> TTFont:
+        font = TTFont()
+        font["glyf"] = newTable("glyf")
+        font["glyf"].glyphs = {}
+        font["hmtx"] = newTable("hmtx")
+        font["hmtx"].metrics = {}
+        font["head"] = newTable("head")
+        font["head"].unitsPerEm = 2048
+        font.setGlyphOrder([])
+        cmap: dict[int, str] = {}
+        for cp, rectangles in mapping.items():
+            build._set_mapped_glyph(font, cmap, cp, build._rectangles_glyph(rectangles), "test", width=2048)
+        build.rebuild_cmap(font, cmap, {})
+        return font
+
+    def test_ui_advances_are_one_cell_without_shrinking_ink(self) -> None:
+        box = [(100, -100, 1100, 1500)]
+        dejavu_bounds = {
+            0x21D5: (284, 0, 948, 1101),
+            0x21E1: (284, 0, 948, 1101),
+            0x21E3: (284, 0, 948, 1101),
+            0x237D: (26, -466, 1207, 181),
+            0x2718: (51, -4, 1182, 1322),
+            0x2726: (43, -24, 1190, 1130),
+        }
+        jetbrains_bounds = {
+            0x276E: (150, 0, 453, 730),
+            0x276F: (147, 0, 450, 730),
+            0x27E8: (125, -115, 485, 815),
+            0x27E9: (115, -115, 475, 815),
+        }
+        nerd_bounds = {
+            cp: [(0, 0, 2 * width, 2 * height)] for cp, (width, height) in validate.NERD_OPTICAL_SIZES.items()
+        }
+        nerd_bounds[0xF011B] = [(100, -200, 1796, 1124)]
+        fonts = {
+            "nerd": self.font(nerd_bounds),
+            "dejavu": self.font({cp: [bounds] for cp, bounds in dejavu_bounds.items()}),
+            "jetbrains": self.font({cp: [bounds] for cp, bounds in jetbrains_bounds.items()}),
+        }
+        target = self.font({0xBB: box, 0x2261: box})
+        cmap = target.getBestCmap()
+        owners: dict[int, str] = {}
+        for glyph in cmap.values():
+            target["hmtx"].metrics[glyph] = (512, 100)
+        build.install_ui_glyphs(target, fonts, cmap, owners)
+        build.rebuild_cmap(target, cmap, {})
+        validate.validate_ui_glyphs(target, "test")
+        self.assertEqual(set(owners), build.NERD_CODEPOINTS | build.UI_SYMBOLS | set(build.BRAILLE_CODEPOINTS))
+        self.assertEqual(build.NERD_CODEPOINTS, validate.NERD_CODEPOINTS)
+        self.assertEqual(build.UI_SYMBOLS, validate.UI_SYMBOLS)
+        self.assertEqual(set(validate.NERD_OPTICAL_SIZES), build.NERD_CODEPOINTS - build.CAP_CODEPOINTS)
+        self.assertEqual({asset.name: (asset.url, asset.sha256) for asset in build.ASSETS}, validate.APPROVED_ASSETS)
+        self.assertEqual(validate._bounds(target, cmap[0xF011B]), (-168, 7, 680, 669))
+        self.assertEqual(target["hmtx"].metrics[cmap[0xF011B]], (512, -168))
+        for mutation in (
+            "unapproved PUA",
+            "missing glyph",
+            "wrong width",
+            "moved dot",
+            "cap gap",
+            "cap reshaped",
+            "symbol recentered",
+            "wide icon shrunk",
+            "icon shifted",
+        ):
+            font = deepcopy(target)
+            mapping = font.getBestCmap()
+            if mutation == "unapproved PUA":
+                mapping[0xE000] = mapping[0xF0140]
+            elif mutation == "missing glyph":
+                del mapping[0xF0140]
+            elif mutation == "wrong width":
+                font["hmtx"].metrics[mapping[0xF0140]] = (1024, 0)
+            elif mutation == "wide icon shrunk":
+                glyph = font["glyf"][mapping[0xF011B]]
+                for index, (x, y) in enumerate(glyph.coordinates):
+                    glyph.coordinates[index] = (round(256 + (x - 256) * 512 / 848), round(338 + (y - 338) * 512 / 848))
+            elif mutation == "icon shifted":
+                glyph = font["glyf"][mapping[0xF011B]]
+                for index, (x, y) in enumerate(glyph.coordinates):
+                    glyph.coordinates[index] = (x, y + 16)
+            elif mutation == "cap reshaped":
+                glyph = font["glyf"][mapping[0xE0B4]]
+                x, y = glyph.coordinates[1]
+                glyph.coordinates[1] = (x + 1, y)
+            else:
+                cp = 0x237D if mutation == "symbol recentered" else 0x2801 if mutation == "moved dot" else 0xE0B4
+                glyph = font["glyf"][mapping[cp]]
+                for index, (x, y) in enumerate(glyph.coordinates):
+                    if mutation == "symbol recentered":
+                        glyph.coordinates[index] = (x, y + 300)
+                    else:
+                        glyph.coordinates[index] = (x + 1 if mutation == "moved dot" else max(1, x), y)
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                validate.validate_ui_glyphs(font, "mutated")
+        del fonts["nerd"].getBestCmap()[0xF0140]
+        with self.assertRaisesRegex(ValueError, "lacks UI codepoints"):
+            build.install_ui_glyphs(target, fonts, cmap, owners)
+
+
 class BoxDrawingTests(unittest.TestCase):
     @staticmethod
     def boxes(bold: bool) -> tuple[TTFont, dict[int, str]]:
